@@ -20,7 +20,7 @@ In short, Stable Diffusion start from a random noisy image and gradually denoisi
 
 ![stable diffusion](https://i.imgur.com/2uC8rYJ.png)
 
-According to DDPM[<sup>1</sup>](#1), image generation sampling 
+According to DDPM[<sup>1</sup>](#1), image generation sampling is defined as
 
 $$
 \begin{equation} \label{eq1} \tag{1}
