@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Preliminary for Consistency Models
-subtitle: Break down the common terminology encounter in Consistency Models
+subtitle: Break down the common terminology encountered in Consistency Models
 gh-repo: rootonchair/rootonchair.github.io
 gh-badge: [follow]
 tags: [en, stable-diffusion]
