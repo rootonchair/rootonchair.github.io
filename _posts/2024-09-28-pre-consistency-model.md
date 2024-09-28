@@ -11,6 +11,7 @@ author: Pham Hong Vinh
 ---
 
 Consistency Models is a popular approach to reduce Stable Diffusion required steps from 30-50 steps to 1-8 steps without sacrifices much of quality image. In reality, you can easily apply Consistency Models to any community base models by attach a LoRA to the model, without any retraining. However, when deep dive into the paper, there are many terminology that cause me somewhat confusing and cause a lot of trouble to grab the concept thoroughly. 
+
 This post is an attempt of me breaking down some terminology that will encounter frequently in Consistency Models. Hoping it would provide some knowledge to understand how could this technique successfully reduce steps in Stable Diffusion models.
 
 
@@ -65,7 +66,8 @@ d\mathbf{x} = [f(\mathbf{x}, t) - g^2(t)\nabla_x log\ p_t(x)]dt + g(t)d\mathbf{w
 \end{equation}
 $$
 
-$$\nabla_x log\ p_t(x)$$ is now the model prediction that we use to denoise the image $$\nabla_x log\ p_t(x) \approx \boldsymbol{\epsilon_\theta}(\mathbf{x_t}, t)$$. This is interesting because $$\nabla_x log\ p_t(x)$$ is the score function (gradient of log likelihood) of probability distribution $$p_t(x)$$, hence the reason why sometimes Stable Diffusion is also referred as score models in literatures . 
+$$\nabla_x log\ p_t(x)$$ is now the model prediction that we use to denoise the image $$\nabla_x log\ p_t(x) \approx \boldsymbol{\epsilon_\theta}(\mathbf{x_t}, t)$$. This is interesting because $$\nabla_x log\ p_t(x)$$ is the score function (gradient of log likelihood) of probability distribution $$p_t(x)$$, hence the reason why sometimes Stable Diffusion is also referred as score models in literatures. 
+
 This sampling process is totally non-deterministic (hence the name) so it would be impossible to know the final destination given the original noise $$\mathbf{x_T} \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$$. Unless, it is...
 
 
