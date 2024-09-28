@@ -73,7 +73,7 @@ This sampling process is totally non-deterministic (hence the name) so it would 
 
 ## Probability Flow - Ordinary differential equation (PF-ODE)
 
-In a research paper[<sup>3</sup>](#3), Song et al. show that it is possible to convert SDE from diffusion sampling process into an ODE, called Probability Flow ODE (PF-ODE). 
+In a research paper[<sup>3</sup>](#3), Song et al. show that it is possible to convert SDE from diffusion sampling process into an ODE, called **Probability Flow ODE** (PF-ODE). 
 
 $$
 \begin{equation}\label{eq5}\tag{5}
