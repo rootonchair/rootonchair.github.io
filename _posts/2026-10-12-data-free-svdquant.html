@@ -1,0 +1,814 @@
+---
+layout: post
+title: Data-free 4-bit quantization for diffusion transformers
+subtitle: Quantize-on-load SVDQuant across four video and image models, and a Hadamard rotation that brings int4 up to nvfp4 quality
+tags: [en, quantization, diffusion]
+comments: true
+full-width: true
+author: Pham Hong Vinh
+excerpt: "Data-free 4-bit quantization of diffusion transformers with Nunchaku Lite SVDQuant: nvfp4 works out of the box, and a Hadamard rotation brings int4 up to nvfp4 quality on A100-class GPUs."
+---
+{% raw %}
+<div class="dfq">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>.dfq{--syn-kw:#8a3b12;--syn-str:#2f6b3a;--syn-com:#8a8578;--syn-num:#1f5f8b;--syn-fn:#6b3fa0;--syn-var:#1f5f8b;--bg:#f7f6f2;--fg:#1d1d1b;--muted:#5d5b55;--line:#d9d6cc;--panel:#ffffff;--accent:#8a3b12;--good:#2c6b3f;--bad:#a0342c;
+ --display:"Source Serif 4",Georgia,serif;--body:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+.dfq{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.55;padding-inline:16px;padding-block:32px 64px}
+.dfq .wrap{max-width:1100px;margin:0 auto}
+.dfq h1{font-family:var(--display);font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.1;text-wrap:balance;margin:0 0 8px}
+.dfq h2{font-family:var(--display);font-weight:700;font-size:24px;margin:48px 0 12px;text-wrap:balance}
+.dfq h3{font-size:16px;font-weight:600;margin:24px 0 6px}
+.dfq p{max-width:72ch;margin:0 0 12px}
+.dfq .lede{font-size:18px;color:var(--muted);max-width:72ch}
+.dfq .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.dfq ul{max-width:72ch;padding-left:20px}
+.dfq li{margin-bottom:6px}
+.dfq .tbl{overflow-x:auto;border:1px solid var(--line);background:var(--panel);margin:12px 0 20px}
+.dfq table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+.dfq th,.dfq td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+.dfq th{font-weight:600;font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+.dfq td.n{font-family:var(--mono);text-align:right}
+.dfq th.n{text-align:right}
+.dfq td.good{color:var(--good);font-weight:600}
+.dfq td.bad{color:var(--bad);font-weight:600}
+.dfq .sheet{margin-block:16px 28px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2));margin-right:0}
+.dfq .sheet img{width:100%;max-width:100%;display:block;border:1px solid var(--line);background:#fff}
+.dfq .sheet figcaption{font-size:14px;color:var(--muted);max-width:80ch;margin-top:8px}
+.dfq .verdict{border-left:3px solid var(--accent);padding:4px 16px;margin:16px 0 24px;max-width:72ch}
+.dfq .verdict p{margin:4px 0}
+.dfq code{font-family:var(--mono);font-size:13px}
+.dfq .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:12px 0 20px}
+.dfq .card{border:1px solid var(--line);background:var(--panel);padding:14px 16px;min-width:0}
+.dfq .card .k{font-family:var(--mono);font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.dfq .card .v{font-family:var(--display);font-size:26px;font-weight:700;margin:4px 0}
+.dfq .card .d{font-size:14px;color:var(--muted)}
+.dfq .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:18px;margin-block:12px 24px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2))}
+.dfq .g{margin:0;min-width:0}
+.dfq .g img{width:100%;max-width:100%;display:block;border:1px solid var(--line);background:#fff}
+.dfq .g figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.dfq details{margin:8px 0 16px}
+.dfq summary{cursor:pointer;font-weight:600}
+.dfq .vc{border:1px solid var(--line);background:var(--panel);padding:12px 14px;margin-block:12px 28px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2))}
+.dfq .vc .bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:10px;font-size:14px}
+.dfq .vc .bar .t{font-weight:600;margin-right:auto}
+.dfq .vc .seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.dfq .vc button,.dfq .vc select{font:inherit;font-size:13px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
+.dfq .vc button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dfq .vc .vgrid{display:grid;gap:14px}
+.dfq .vc .vrow{display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));gap:12px}
+@media (max-width:820px){.dfq .vc .vrow{grid-template-columns:1fr}}
+.dfq .vc .tile{min-width:0}
+.dfq .vc .tile video{width:100%;max-width:100%;display:block;background:#000;object-fit:contain}
+.dfq .vc .tile .lab{font-family:var(--mono);font-size:12px;color:var(--muted);margin:4px 0 0}
+.dfq .vc .note{font-size:13px;color:var(--muted);margin:8px 0 0}
+.dfq .steps{max-width:72ch;padding-left:22px}
+.dfq .steps li{margin-bottom:10px}
+.dfq .steps li p{margin:0 0 4px}
+.dfq mjx-container[display="true"]{overflow-x:auto;overflow-y:hidden;margin:6px 0 4px!important}
+.dfq .diag{margin:18px 0 26px}
+.dfq .diag .dscroll{overflow-x:auto;max-width:100%}
+.dfq .diag .dpair{display:flex;flex-wrap:wrap;gap:12px 24px}
+.dfq .diag .dpair svg.half{flex:1 1 340px;min-width:0;width:auto;max-width:100%;height:auto;color:var(--fg);font-family:var(--body)}
+.dfq .diag svg{display:block;width:100%;min-width:680px;height:auto;color:var(--fg);font-family:var(--body)}
+.dfq .diag figcaption{font-size:14px;color:var(--muted);max-width:80ch;margin-top:8px}
+.dfq .paths code{word-break:break-all}
+.dfq .vc .spd{font-size:13px;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+.dfq .code{position:relative;margin:10px 0 16px;max-width:72ch}
+.dfq .code pre{margin:0;overflow-x:auto;background:var(--panel);border:1px solid var(--line);padding:14px 16px;font-family:var(--mono);font-size:13px;line-height:1.55;color:var(--fg)}
+.dfq .code .copy{position:absolute;top:8px;right:8px;font:12px var(--mono);color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:3px 8px;cursor:pointer}
+.dfq .hljs-keyword,.dfq .hljs-built_in,.dfq .hljs-literal,.dfq .hljs-meta{color:var(--syn-kw)}
+.dfq .hljs-string,.dfq .hljs-subst{color:var(--syn-str)}
+.dfq .hljs-comment{color:var(--syn-com);font-style:italic}
+.dfq .hljs-number{color:var(--syn-num)}
+.dfq .hljs-title,.dfq .hljs-title.function_,.dfq .hljs-params{color:var(--syn-fn)}
+.dfq .hljs-variable,.dfq .hljs-attr,.dfq .hljs-template-variable{color:var(--syn-var)}
+.dfq .code .copy:hover,.dfq .code .copy:focus-visible{color:var(--accent);border-color:var(--accent)}
+.dfq .toc{border:1px solid var(--line);background:var(--panel);padding:14px 18px;margin:16px 0 20px;max-width:72ch}
+.dfq .toc .eyebrow{margin-bottom:6px}
+.dfq .toc ol{margin:0;padding-left:22px;columns:2 220px;column-gap:28px}
+.dfq .toc li{margin:0 0 6px;break-inside:avoid}
+.dfq .toc li>a{font-weight:600}
+.dfq .toc ul{margin:4px 0 0;padding-left:16px;list-style:none;font-size:13px}
+.dfq .toc ul li{margin:0 0 3px}
+.dfq .toc a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+.dfq .toc a:hover,.dfq .toc a:focus-visible{color:var(--accent);border-color:var(--accent)}
+.dfq h2,.dfq h3{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 12px)}
+.dfq .dir{font-family:var(--mono);color:var(--accent);font-weight:600;margin-left:2px}
+.dfq .legend{font-size:13px;color:var(--muted);margin:12px 0 -4px}
+.dfq .legend-inline{font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+.dfq .keyline{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--panel);display:inline-block;padding:6px 10px;margin:4px 0 8px}
+.dfq .verdict{border-left:3px solid var(--accent);padding:4px 16px;margin:16px 0 24px;max-width:72ch}
+.dfq .verdict p{margin:4px 0}
+.dfq .cite{color:var(--accent);text-decoration:none;font-size:11px}
+.dfq .cite:hover{text-decoration:underline}
+.dfq .refs{max-width:80ch;font-size:14px;padding-left:22px}
+.dfq .refs li{margin-bottom:6px}
+.dfq .refs li:target{background:var(--panel)}
+.dfq .vcap{font-size:14px;color:var(--muted);max-width:80ch;margin:-16px 0 28px}
+.dfq .zoom{all:unset;display:block;cursor:zoom-in;width:100%}
+.dfq .zoom:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dfq .sheet img{cursor:zoom-in}
+.dfq #viewer{position:fixed;inset:0;background:rgba(0,0,0,.92);overflow:auto;z-index:10;padding:16px;cursor:zoom-out}
+.dfq #viewer img{display:block;width:100%;max-width:none;margin:0 auto;background:#fff;cursor:zoom-in}
+.dfq #viewer.native img{width:auto;cursor:zoom-out}
+.dfq #viewer .hint{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:16px;color:#fff;font-family:var(--mono);font-size:12px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px}
+.dfq{padding-inline:0;padding-block:8px 32px;font-size:16px;background:transparent;--bg:#ffffff;--panel:#fafaf8}
+.dfq h2,.dfq h3{scroll-margin-top:80px;margin-top:2em}
+.dfq a{color:var(--accent)}
+.dfq table{margin:0}
+.dfq .toc a{color:var(--fg)}
+.dfq #viewer{z-index:2000}
+.dfq code{color:inherit;background:transparent;padding:0;border-radius:0;font-size:13px}
+.dfq td{white-space:normal}
+.dfq th{white-space:nowrap}
+.dfq td:first-child{min-width:13em}
+.dfq td.n{min-width:7.5em}
+.dfq .wrap>p,.dfq .wrap>ul,.dfq .wrap>ol,.dfq .wrap>ol.steps,.dfq .wrap>h2,.dfq .wrap>h3,.dfq .wrap>.lede,.dfq .wrap>.verdict,.dfq .wrap>.toc,.dfq .wrap>details>summary,.dfq .vcap,.dfq .sheet figcaption,.dfq .diag figcaption{max-width:var(--title-col,730px);margin-inline:auto}
+.dfq .wrap>.keyline{display:block;max-width:var(--title-col,730px);margin-inline:auto}
+.dfq .code{max-width:var(--title-col,730px);margin-inline:auto}
+/* theme footer of this post (tags, share icons, prev/next): same centered column as the title */
+.blog-tags,#social-share-section,.pagination.blog-pager{max-width:var(--title-col,730px);margin-left:auto;margin-right:auto}
+</style>
+<div class="wrap">
+<p class="lede">Quantize-on-load with no calibration data, scored as seed-matched PSNR/SSIM against a bf16 reference generated on the same GPU. Four models, three precisions, one recipe.</p>
+
+<p class="keyline"><span class="dir" title="higher is better">↑</span> higher is better &nbsp;·&nbsp; <span class="dir" title="lower is better">↓</span> lower is better &nbsp;·&nbsp; <span class="dir" title="1.0 means identical to bf16">→1</span> closest to 1.0 is best (ratios vs bf16). Every quality metric is measured against a bf16 reference.</p>
+<nav class="toc" aria-label="Outline"><div class="eyebrow">Outline</div><ol><li><a href="#quality-vs-bf16">Quality vs bf16</a></li><li><a href="#memory-speed-and-load-time">Memory, speed and load time</a></li><li><a href="#visual-comparison">Visual comparison</a></li><li><a href="#rank-and-smoothing">Rank and smoothing</a></li><li><a href="#calibrated-vs-data-free">Calibrated vs data-free</a></li><li><a href="#hadamard-rotation-the-int4-improvement">Hadamard rotation: the int4 improvement</a></li><li><a href="#tested-and-negative">Tested and negative</a></li><li><a href="#recommended-configs">Recommended configs</a></li><li><a href="#code-samples">Code samples</a></li></ol></nav>
+<div class="grid">
+ <div class="card"><div class="k">Models validated</div><div class="v">4</div><div class="d">LTX-2.3 19B (distilled + base), FLUX.2-klein 9B/4B, MiniMax-H3 30.8B, Qwen-Image-2.1 7B</div></div>
+ <div class="card"><div class="k">Zero-config targets</div><div class="v">1344 / 362 / 224</div><div class="d">Quantized linears auto-selected on LTX / MiniMax / Qwen with no per-model tuning; the same recipe on every architecture</div></div>
+ <div class="card"><div class="k">nvfp4 over int4</div><div class="v">+1.4 to +4 dB</div><div class="d">Precision is the first lever on every model. nvfp4 needs no tuning; int4 drifts further from bf16</div></div>
+ <div class="card"><div class="k">Memory</div><div class="v">3.3 to 3.6×</div><div class="d">Transformer bf16 → int4/nvfp4. MiniMax 61.7 → 17 GB makes the pipeline resident on 96 GB</div></div>
+</div>
+
+<div class="verdict">
+<p><strong>Verdict on the base method.</strong> nvfp4 with plain defaults is the safe precision on every model. int4 trails it by 1.4 to 4 dB at any rank or smoothing setting. The remaining defects are int4 trajectory drift and temporal flicker on video, both of which live in activation quantization and are not fixed by any recipe setting. Two follow-up sections below set this recipe beside calibrated checkpoints and present the Hadamard rotation that addresses the int4 gap.</p>
+</div>
+
+<h2 id="quality-vs-bf16">Quality vs bf16</h2>
+<p>Each cell is PSNR in dB <span class="dir" title="higher is better">↑</span> / SSIM <span class="dir" title="higher is better">↑</span> against a bf16 reference from the same GPU, averaged over 5 seed-matched samples. Both precisions use the default recipe: rank 32, smoothing 0.5, no rotation. Per-sample spread is about ±3 dB, so treat differences under 0.5 dB as ties.</p>
+<div class="tbl"><table>
+<tr><th>model</th><th>setup</th><th class="n">nvfp4</th><th class="n">int4</th></tr>
+<tr><td>LTX-2.3-Distilled 19B</td><td>video, 768×512, 121 frames, 8 steps</td><td class="n good">17.33 / 0.60</td><td class="n">13.29 / 0.42</td></tr>
+<tr><td>MiniMax-H3 30.8B</td><td>video + audio, 960×544, 124 frames</td><td class="n good">15.87 / 0.54</td><td class="n">14.52 / 0.46</td></tr>
+<tr><td>FLUX.2-klein-9B</td><td>text-to-image, 1024², 4 steps</td><td class="n good">18.14 / 0.70</td><td class="n">16.40 / 0.61</td></tr>
+<tr><td>Qwen-Image-2.1 7B</td><td>text-to-image, 2048², 40 steps</td><td class="n good">22.74 / 0.89</td><td class="n">20.45 / 0.82</td></tr>
+<tr><td>Qwen-Image-2.1 7B</td><td>image edits, 12 instructions</td><td class="n good">25.27 / 0.89</td><td class="n">21.84 / 0.84</td></tr>
+</table></div>
+
+<h2 id="memory-speed-and-load-time">Memory, speed and load time</h2>
+<div class="tbl"><table>
+<tr><th>model</th><th class="n">bf16 weights</th><th class="n">quantized <span class="dir" title="lower is better">↓</span></th><th class="n">quantize-on-load <span class="dir" title="lower is better">↓</span></th><th class="n">nvfp4 speed vs bf16 <span class="dir" title="higher is better">↑</span></th><th class="n">int4 speed vs bf16, A100 <span class="dir" title="higher is better">↑</span></th></tr>
+<tr><td>MiniMax-H3 (RTX PRO 6000 96 GB / A100 80 GB)</td><td class="n">61.7 GB</td><td class="n">17.1–18.1 GB</td><td class="n">17–22 min</td><td class="n good">1.67× faster</td><td class="n good">1.24× faster</td></tr>
+<tr><td>Qwen-Image-2.1 (RTX PRO 6000)</td><td class="n">13.25 GB</td><td class="n">3.9–4.1 GB</td><td class="n">10 min</td><td class="n good">1.36× faster at 4k tokens, ≈1× at 2k</td><td class="n">not run on A100</td></tr>
+<tr><td>FLUX.2-klein-9B (RTX PRO 6000)</td><td class="n">—</td><td class="n">—</td><td class="n">3.5 min</td><td class="n good">1.5× faster</td><td class="n">not run on A100</td></tr>
+<tr><td>LTX-2.3 19B (A100)</td><td class="n">35.4 GB</td><td class="n">10.6 GB (r32) / 12.3 GB (r128)</td><td class="n">22 min (pre-quantized export loads in 40 s)</td><td class="n">—</td><td class="n">≈ bf16</td></tr>
+</table></div>
+<p>int4 speed is shown only where it ran on its target hardware, the A100. Qwen-Image-2.1 and FLUX.2 int4 were run on Blackwell, which has no native int4 tensor-core path for this kernel, so their timings there (2.2 to 3× slower than bf16) reflect the GPU, not int4 itself. Pre-quantized export's real value is load time, not quality.</p>
+
+<h2 id="visual-comparison">Visual comparison</h2>
+<p>Video comparisons show every configuration of one seed side by side; pick a scene, then play whichever video you want to watch. Set speed to 0.25× to see flicker. Image comparisons are contact sheets with the same seed down each column. The int4 rows are compared with the A100 bf16 row and the nvfp4 rows with the RTX bf16 row, because the same seed gives a different trajectory on a different GPU.</p>
+
+<h3 id="ltx-2-3-distilled-int4-default-vs-rank-128-vs-nv">LTX-2.3-Distilled: int4 default vs rank 128 vs nvfp4</h3>
+<div class="vc" data-group="ltx_distilled"></div>
+<p class="vcap">What to look for: plain int4 keeps the scene but shifts pose, lighting and composition (the drummer gains headphones, the car moves lanes, the fireworks change count). int4 at rank 128 tracks its reference more closely. nvfp4 against its own RTX reference is the closest match. Every video is clean and sharp; the loss is trajectory drift, not artifacts.</p>
+
+
+<h3 id="minimax-h3-joint-audio-video-30-8b">MiniMax-H3: joint audio-video, 30.8B</h3>
+<div class="vc" data-group="minimax"></div>
+<p class="vcap">nvfp4 is compared with the RTX reference and int4 with the A100 reference. Both keep the scene and the camera move; int4 drifts further in the drummer's framing and the dog's pose. With sound on, the quantized soundtracks are a different rendition of the same scene (envelope correlation about 0.55 to 0.6), not a failure.</p>
+
+<h3 id="flux-2-klein-9b-4-step-image-model">FLUX.2-klein-9B: 4-step image model</h3>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/flux2.webp" alt="FLUX.2 contact sheet"><figcaption>FLUX.2-klein-9B. nvfp4 is near-identical to bf16; int4 keeps the composition but changes details such as the saxophonist's face and the dog's pose.</figcaption></figure>
+
+<h3 id="qwen-image-2-1-text-to-image-across-cfg-and-an-e">Qwen-Image-2.1: text-to-image across CFG, and an edit</h3>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_sample0.webp" alt="Qwen-Image-2.1 sample 0 sheet"><figcaption>Qwen-Image-2.1: rows bf16 / nvfp4 / int4, columns CFG off / 2.5 / 4. nvfp4 stays on-prompt; int4 drifts further, more so at higher CFG.</figcaption></figure>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit0.webp" alt="Qwen-Image-2.1 edit 0 sheet"><figcaption>Qwen-Image-2.1 edit. The input image anchors the result, so both precisions stay close to bf16.</figcaption></figure>
+<h3 id="all-qwen-image-2-1-sheets">All Qwen-Image-2.1 sheets</h3>
+<p>Every sheet has rows bf16 / nvfp4 / int4 and columns CFG off / 2.5 / 4, with PSNR <span class="dir" title="higher is better">↑</span> and LPIPS <span class="dir" title="lower is better">↓</span> against bf16 on each quantized tile. Click any sheet to view it at full size.</p>
+<details><summary>Text-to-image, 5 prompts (2048², 40 steps)</summary>
+<div class="gal">
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_sample0.webp" aria-label="Open Qwen text-to-image sheet 0 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_sample0.webp" alt="Qwen text-to-image sheet 0" loading="lazy" decoding="async" width="640"></button><figcaption>sample0: A street musician playing saxophone under a lamppost, holding a cardboard sign that says OPEN MIC, warm evening light.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_sample1.webp" aria-label="Open Qwen text-to-image sheet 1 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_sample1.webp" alt="Qwen text-to-image sheet 1" loading="lazy" decoding="async" width="640"></button><figcaption>sample1: A misty mountain valley at sunrise, a winding river reflecting golden clouds, pine forests on the slopes.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_sample2.webp" aria-label="Open Qwen text-to-image sheet 2 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_sample2.webp" alt="Qwen text-to-image sheet 2" loading="lazy" decoding="async" width="640"></button><figcaption>sample2: A rainy neon-lit city street at night, reflections on wet asphalt, people with umbrellas, cinematic.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_sample3.webp" aria-label="Open Qwen text-to-image sheet 3 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_sample3.webp" alt="Qwen text-to-image sheet 3" loading="lazy" decoding="async" width="640"></button><figcaption>sample3: A golden retriever mid-leap catching a frisbee in a sunlit meadow, motion blur in the grass.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_sample4.webp" aria-label="Open Qwen text-to-image sheet 4 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_sample4.webp" alt="Qwen text-to-image sheet 4" loading="lazy" decoding="async" width="640"></button><figcaption>sample4: A still life of oranges, a ceramic teapot and lace cloth on a wooden table, dramatic window light, fine texture.</figcaption></figure>
+</div></details>
+<details><summary>Edits, 12 instructions (own edits 0–4, identity edit 5, blog Fidelity pairs 6–11)</summary>
+<div class="gal">
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit0.webp" aria-label="Open Qwen edit sheet 0 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit0.webp" alt="Qwen edit sheet 0" loading="lazy" decoding="async" width="640"></button><figcaption>edit0 (T2I sample 0): Change the text on the cardboard sign to say JAZZ TONIGHT.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit1.webp" aria-label="Open Qwen edit sheet 1 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit1.webp" alt="Qwen edit sheet 1" loading="lazy" decoding="async" width="640"></button><figcaption>edit1 (T2I sample 1): Add a red hot-air balloon floating above the river.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit2.webp" aria-label="Open Qwen edit sheet 2 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit2.webp" alt="Qwen edit sheet 2" loading="lazy" decoding="async" width="640"></button><figcaption>edit2 (T2I sample 2): Turn the rain into a snowy winter night, with snow covering the street and the umbrellas.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit3.webp" aria-label="Open Qwen edit sheet 3 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit3.webp" alt="Qwen edit sheet 3" loading="lazy" decoding="async" width="640"></button><figcaption>edit3 (T2I sample 3): Replace the golden retriever with a black labrador, keeping the frisbee and the leaping pose.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit4.webp" aria-label="Open Qwen edit sheet 4 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit4.webp" alt="Qwen edit sheet 4" loading="lazy" decoding="async" width="640"></button><figcaption>edit4 (T2I sample 4): Change the oranges into green apples and make the teapot cobalt blue.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit5.webp" aria-label="Open Qwen edit sheet 5 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit5.webp" alt="Qwen edit sheet 5" loading="lazy" decoding="async" width="640"></button><figcaption>edit5 (T2I sample 0): Keep the man's face and identity exactly the same; put him in a white suit on a concert stage under spotlights.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit6.webp" aria-label="Open Qwen edit sheet 6 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit6.webp" alt="Qwen edit sheet 6" loading="lazy" decoding="async" width="640"></button><figcaption>edit6 (blog_example-25.png): Show this woman full-body, walking along a wooden boardwalk through a mangrove forest, wearing a white T-shirt and khaki cargo pants, holding a straw hat.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit7.webp" aria-label="Open Qwen edit sheet 7 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit7.webp" alt="Qwen edit sheet 7" loading="lazy" decoding="async" width="640"></button><figcaption>edit7 (blog_example-27.png): Change her hairstyle to long, loose wavy hair falling over her shoulders; keep everything else the same.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit8.webp" aria-label="Open Qwen edit sheet 8 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit8.webp" alt="Qwen edit sheet 8" loading="lazy" decoding="async" width="640"></button><figcaption>edit8 (blog_example-29.png): Show her sitting in a cozy living room, smiling while opening a cardboard package, wearing the same sweater and scarf.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit9.webp" aria-label="Open Qwen edit sheet 9 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit9.webp" alt="Qwen edit sheet 9" loading="lazy" decoding="async" width="640"></button><figcaption>edit9 (blog_example-31.png): Place this foundation bottle on a wooden table by a sunny window, next to a cup of tea and a plate of strawberries.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit10.webp" aria-label="Open Qwen edit sheet 10 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit10.webp" alt="Qwen edit sheet 10" loading="lazy" decoding="async" width="640"></button><figcaption>edit10 (blog_example-33.png): Show this dress worn by a woman standing full-body in a warm-toned studio.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_b_edit11.webp" aria-label="Open Qwen edit sheet 11 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_b_edit11.webp" alt="Qwen edit sheet 11" loading="lazy" decoding="async" width="640"></button><figcaption>edit11 (blog_example-35.png): Show this bracelet worn on a woman's wrist as she sits at a wooden table with a teapot, wearing a linen blouse.</figcaption></figure>
+</div></details>
+
+<h2 id="rank-and-smoothing">Rank and smoothing</h2>
+<p>The data-free recipe has two settings: <strong>rank</strong>, the size of the low-rank branch that keeps the largest weight components in 16-bit, and <strong>smoothing strength</strong>, how far each input channel is rescaled before 4-bit rounding, from 0 (off) to 1 (fully flattened). The defaults are rank 32 and smoothing 0.5.</p>
+
+<h3 id="smoothing-barely-matters-at-the-default-rank">Smoothing barely matters at the default rank</h3>
+<div class="tbl"><table>
+<tr><th>model · precision, rank 32 (PSNR dB <span class="dir" title="higher is better">↑</span>)</th><th class="n">off (0)</th><th class="n">0.25</th><th class="n">0.5 (default)</th><th class="n">0.75</th></tr>
+<tr><td>LTX-2.3-Distilled · int4</td><td class="n">13.06</td><td class="n">12.53</td><td class="n">13.29</td><td class="n">13.00</td></tr>
+<tr><td>FLUX.2-klein-9B · nvfp4</td><td class="n">18.62</td><td class="n">17.94</td><td class="n">18.14</td><td class="n">18.58</td></tr>
+</table></div>
+
+<h3 id="rank-helps-only-when-smoothing-is-retuned-with-i">Rank helps only when smoothing is retuned with it</h3>
+<div class="tbl"><table>
+<tr><th>LTX-2.3-Distilled · int4 (PSNR dB <span class="dir" title="higher is better">↑</span> / SSIM <span class="dir" title="higher is better">↑</span>)</th><th class="n">smoothing off</th><th class="n">0.1</th><th class="n">0.25</th><th class="n">0.5 (default)</th><th class="n">transformer size</th></tr>
+<tr><td>rank 32 (default)</td><td class="n">13.06 / 0.42</td><td class="n">13.39 / 0.44</td><td class="n">12.53 / 0.41</td><td class="n">13.29 / 0.42</td><td class="n">10.6 GB</td></tr>
+<tr><td>rank 64</td><td class="n">13.25 / 0.43</td><td class="n">13.68 / 0.45</td><td class="n">14.27 / 0.47</td><td class="n good">15.11 / 0.52</td><td class="n">11.2 GB</td></tr>
+<tr><td>rank 128</td><td class="n">13.93 / 0.48</td><td class="n">14.57 / 0.53</td><td class="n good">15.99 / 0.54</td><td class="n">13.65 / 0.45</td><td class="n">12.3 GB</td></tr>
+</table></div>
+<ul>
+<li><strong>Up to +2.7 dB, but only at the right smoothing.</strong> Rank 128 reaches 15.99 dB at smoothing 0.25 and gains nothing at the default 0.5. The best smoothing value falls as rank grows, because the low-rank branch and smoothing absorb the same outliers.</li>
+<li><strong>Cost.</strong> Transformer memory grows about 16% from rank 32 to 128. Inference time and quantize-on-load time do not change.</li>
+<li><strong>Not worth it with rotation.</strong> Hadamard rotation at rank 32 reaches the same quality (15.42 dB) at the default memory, and rank 128 with rotation is worse (14.28 dB). See the Hadamard section.</li>
+<li><strong>Other models.</strong> On MiniMax-H3, rank 64 cuts weight error by only about 3%; no end-to-end comparison was scored. Qwen-Image-2.1 and FLUX.2 were run at rank 32 only.</li>
+</ul>
+
+
+<h2 id="calibrated-vs-data-free">Calibrated vs data-free</h2>
+<p class="lede">The stock recipe above uses no data at all. Here it is set beside checkpoints that were calibrated on real activations, on the two models where such checkpoints exist, with the same seeds and the same bf16 references.</p>
+<p>The calibrated checkpoints were quantized with <a href="https://github.com/rootonchair/diffuse-compressor" target="_blank" rel="noopener">rootonchair/diffuse-compressor</a>, which runs the model on calibration data and chooses the smoothing values that minimize each block's error.</p>
+<p>Weights used:</p>
+<ul class="paths"><li>LTX-2.3-Distilled int4: <a href="https://huggingface.co/lite-infer/LTX-2.3-Distilled-v1.1-Diffusers-nunchaku-lite-int4-bnb4-text-encoder" target="_blank" rel="noopener"><code>lite-infer/LTX-2.3-Distilled-v1.1-Diffusers-nunchaku-lite-int4-bnb4-text-encoder</code></a></li><li>LTX-2.3-Distilled nvfp4: <a href="https://huggingface.co/lite-infer/LTX-2.3-Distilled-v1.1-Diffusers-nunchaku-lite-nvfp4-bnb4-text-encoder" target="_blank" rel="noopener"><code>lite-infer/LTX-2.3-Distilled-v1.1-Diffusers-nunchaku-lite-nvfp4-bnb4-text-encoder</code></a></li><li>MiniMax-H3 int4: <a href="https://huggingface.co/rootonchair/MiniMax-H3-nunchaku-lite-int4/tree/main/calibrated-8x20" target="_blank" rel="noopener"><code>rootonchair/MiniMax-H3-nunchaku-lite-int4/calibrated-8x20</code></a></li><li>MiniMax-H3 nvfp4: <a href="https://huggingface.co/rootonchair/MiniMax-H3-nunchaku-lite-nvfp4/tree/main/calibrated-8x20" target="_blank" rel="noopener"><code>rootonchair/MiniMax-H3-nunchaku-lite-nvfp4/calibrated-8x20</code></a></li></ul>
+<div class="verdict"><p><strong>Summary.</strong> Calibration lowers and evens out the error inside each layer, and on MiniMax-H3 it gives visibly cleaner frames on scenes where data-free shows streaks and grain.</p></div>
+
+<div class="grid">
+ <div class="card"><div class="k">Per-layer error, nvfp4 (LTX)</div><div class="v">6.9% vs 7.6%</div><div class="d">Calibrated vs data-free, full 4-bit layer error <span class="dir" title="lower is better">↓</span>, measured on real activations</div></div>
+ <div class="card"><div class="k">Per-layer error, int4 (LTX)</div><div class="v">9.3% vs 11.4%</div><div class="d">Calibrated vs data-free, same measurement</div></div>
+ <div class="card"><div class="k">Worst layers (LTX)</div><div class="v">≤20% vs 80%</div><div class="d">Calibration flattens the spiky layers where data-free error peaks</div></div>
+ <div class="card"><div class="k">MiniMax-H3 int4, rainy street</div><div class="v">50.7 vs 39.3</div><div class="d">MUSIQ image quality <span class="dir" title="higher is better">↑</span>, calibrated vs data-free (bf16 51.9): data-free shows streak artifacts</div></div>
+</div>
+
+
+<h3 id="per-layer-error">Per-layer error</h3>
+<ul>
+<li><strong>Calibration trades weight precision for activation precision.</strong> Its smoothing scales are much larger, so the weights themselves are rounded less exactly: 12.2% vs 8.2% relative weight error (nvfp4) and 12.6% vs 9.8% (int4) on LTX. In exchange, activation error drops sharply.</li>
+<li><strong>The full layer comes out ahead.</strong> Scored on 512 real activation rows per layer through the whole 4-bit path, calibrated error is lower on 946 of 1344 layers (nvfp4): 6.9% vs 7.6% (nvfp4) and 9.3% vs 11.4% (int4).</li>
+<li><strong>And far more even.</strong> Data-free error is spiky, reaching 80% activation error on some attention output layers. Calibration brings those to 20% or less, including the layer with the largest weight error (6.2% vs 9.7% full error).</li>
+<li>Caveat: the activations came from a data-free nvfp4 run because a bf16 capture did not fit on that machine, so the comparison is fair between the two recipes but absolute levels depend on that run.</li>
+</ul>
+
+<h3 id="image-quality">Image quality</h3>
+<p>Every 16th frame of each video was scored with MUSIQ, a learned image-quality model (<span class="dir" title="higher is better">↑</span>, roughly 0 to 100). It judges each frame on its own, so it captures artifacts such as streaks and grain directly.</p>
+<div class="tbl"><table>
+<tr><th>model · precision (MUSIQ <span class="dir" title="higher is better">↑</span>)</th><th class="n">bf16</th><th class="n">calibrated</th><th class="n">data-free</th></tr>
+<tr><td>MiniMax-H3 · int4, rainy street scene</td><td class="n">51.9</td><td class="n">50.7</td><td class="n">39.3</td></tr>
+<tr><td>MiniMax-H3 · int4, all scenes</td><td class="n">55.6</td><td class="n">54.9</td><td class="n">54.1</td></tr>
+<tr><td>MiniMax-H3 · nvfp4, all scenes</td><td class="n">55.6</td><td class="n">53.7</td><td class="n">51.5</td></tr>
+<tr><td>LTX-2.3-Distilled · int4, all scenes</td><td class="n">57.4</td><td class="n">52.6</td><td class="n">56.5</td></tr>
+<tr><td>LTX-2.3-Distilled · nvfp4, all scenes</td><td class="n">55.6</td><td class="n">55.9</td><td class="n">56.4</td></tr>
+</table></div>
+<ul>
+<li><strong>MiniMax-H3.</strong> On the rainy street, data-free int4 shows vertical and horizontal streaks across the buildings and dark areas, and calibrated int4 stays clean, close to bf16. On the ocean scene, data-free int4 water and sky are grainier. Calibrated nvfp4 also scores higher across all scenes.</li>
+<li><strong>LTX-2.3-Distilled.</strong> Side-by-side crops of two scenes show no visible artifact difference between the two recipes.</li>
+<li><strong>Why.</strong> The spiky per-layer errors of data-free are a plausible source of streaks and grain; calibration's flatter error avoids them.</li>
+<li>Limits: 5 videos per setting and one learned metric.</li>
+</ul>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/cal_crop_street.webp" alt="MiniMax int4 rainy street crops: bf16, calibrated, data-free"><figcaption>MiniMax-H3 int4, rainy street, 2× crop: bf16, calibrated, data-free. Data-free shows streaks over the buildings and dark areas.</figcaption></figure>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/cal_crop_ocean.webp" alt="MiniMax int4 ocean crops: bf16, calibrated, data-free"><figcaption>MiniMax-H3 int4, ocean, 2× crop: bf16, calibrated, data-free. Data-free water and sky are grainier.</figcaption></figure>
+
+<h3 id="closeness-to-bf16">Closeness to bf16</h3>
+<div class="tbl"><table>
+<tr><th>model · precision (PSNR <span class="dir" title="higher is better">↑</span> / SSIM <span class="dir" title="higher is better">↑</span>)</th><th class="n">calibrated</th><th class="n">data-free</th></tr>
+<tr><td>LTX-2.3-Distilled · int4 (A100)</td><td class="n">12.62 / 0.39</td><td class="n">13.29 / 0.42</td></tr>
+<tr><td>LTX-2.3-Distilled · nvfp4 (RTX PRO 6000)</td><td class="n">15.34 / 0.52</td><td class="n">17.33 / 0.60</td></tr>
+<tr><td>MiniMax-H3 · nvfp4</td><td class="n">15.23</td><td class="n">15.66</td></tr>
+<tr><td>MiniMax-H3 · int4</td><td class="n">13.87</td><td class="n">14.48</td></tr>
+</table></div>
+<p>PSNR and SSIM against a same-GPU bf16 reference, 5 seed-matched samples. These measure how closely each video follows the bf16 one, not how clean its frames look; quantized videos drift to slightly different compositions, which dominates these scores.</p>
+
+<h3 id="visual-comparison-ltx-2-3-distilled">Visual comparison: LTX-2.3-Distilled</h3>
+<div class="vc" data-group="cal_ltx"></div>
+<p class="vcap">Both recipes keep each scene and drift from their reference in their own way: the drummer's pose, the car's position and the fireworks layout change from run to run.</p>
+
+<h3 id="visual-comparison-minimax-h3">Visual comparison: MiniMax-H3</h3>
+<div class="vc" data-group="cal_minimax"></div>
+<p class="vcap">Everything is compared with the RTX reference. On the rainy street, data-free int4 shows streak artifacts that calibrated int4 avoids; set speed to 0.25× and play each to compare. Calibrated int4 renders the drummer and fireworks with stronger contrast. Each video has its own volume control; both soundtracks are renditions of the same scene.</p>
+
+<h2 id="hadamard-rotation-the-int4-improvement">Hadamard rotation: the int4 improvement</h2>
+<p class="lede">Everything above uses the stock recipe. This section is the one change that moved int4 by more than trajectory noise: a data-free blockwise Hadamard rotation of the quantized residual, with the matching Walsh–Hadamard transform fused into the activation-quantization kernel. Validated on two video models and, as of 2026-10-09, on Qwen-Image-2.1.</p>
+
+<div class="grid">
+ <div class="card"><div class="k">LTX-2.3-Distilled, int4 r32</div><div class="v">+1.7 dB</div><div class="d">13.70 → 15.42 PSNR, SSIM 0.43 → 0.54, vs the same kernel with rotation off</div></div>
+ <div class="card"><div class="k">MiniMax-H3, int4 r32</div><div class="v">+1.1 dB</div><div class="d">14.52 → 15.64, SSIM 0.46 → 0.53. Rotated int4 ≈ plain nvfp4 (15.87)</div></div>
+ <div class="card"><div class="k">Qwen-Image-2.1, int4 r32</div><div class="v">+2.3 to +3.2 dB</div><div class="d">20.5 / 18.4 / 16.9 → 22.8 / 20.8 / 20.2 at CFG off / 2.5 / 4. Ties nvfp4 (22.7 / 21.6 / 21.0)</div></div>
+ <div class="card"><div class="k">Cost and limits</div><div class="v">+0.7% time</div><div class="d">Zero extra memory. Never combine with nvfp4 (−2.2 dB) or rank 128</div></div>
+</div>
+
+<h3 id="design">Design</h3>
+<p><strong>The problem it solves.</strong> 4-bit quantization gives each group of 64 input channels one shared scale. If one channel in a group carries a value ten times larger than its neighbours, the scale has to stretch to fit it, and every other channel in that group is rounded on a coarse grid. Diffusion transformers have exactly this: a handful of activation channels are consistently much larger than the rest, in a different place for every token. The low-rank branch of SVDQuant<sup><a class="cite" href="#ref-1">[1]</a></sup> absorbs the largest weight outliers, and smoothing<sup><a class="cite" href="#ref-2">[2]</a></sup> moves some activation range into the weights. But smoothing scales are computed from the weights, so they cannot follow outliers that change from token to token, and those remain the main error source.</p>
+<p><strong>The idea: rotate before rounding.</strong> Multiplying a vector by an orthonormal matrix changes its coordinates but not its length, and multiplying both sides of a matrix product by the same rotation leaves the result unchanged. A Hadamard matrix is a particularly convenient rotation: every entry is ±1/√n, so each output coordinate is an even mix of all inputs. One large channel gets spread across the whole block, and the rotated values look close to Gaussian, which a uniform 4-bit grid represents far better. This "incoherence processing" was introduced for weight quantization by QuIP<sup><a class="cite" href="#ref-3">[3]</a></sup> with random orthogonal matrices. QuIP#<sup><a class="cite" href="#ref-4">[4]</a></sup> switched to randomized Hadamard transforms because they can be applied fast. QuaRot<sup><a class="cite" href="#ref-5">[5]</a></sup> extended it to activations to run LLMs fully in 4 bits, and SpinQuant<sup><a class="cite" href="#ref-6">[6]</a></sup> learns the rotation instead of fixing it.</p>
+<figure class="diag"><div class="dpair">
+<svg class="half" viewBox="0 0 460 306" role="img" aria-label="Without rotation: the outlier sets the 4-bit step and seven of eight channels round to zero.">
+<text x="230" y="26" text-anchor="middle" font-size="14" font-weight="600" fill="currentColor">SVDQuant: round the group as is</text>
+<line x1="30" y1="241.4" x2="430" y2="241.4" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="230.0" x2="430" y2="230.0" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="218.6" x2="430" y2="218.6" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="207.1" x2="430" y2="207.1" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="195.7" x2="430" y2="195.7" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="184.3" x2="430" y2="184.3" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="172.9" x2="430" y2="172.9" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="161.4" x2="430" y2="161.4" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="150.0" x2="430" y2="150.0" stroke="currentColor" stroke-opacity="0.45" stroke-width="1"/>
+<line x1="30" y1="138.6" x2="430" y2="138.6" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="127.1" x2="430" y2="127.1" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="115.7" x2="430" y2="115.7" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="104.3" x2="430" y2="104.3" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="92.9" x2="430" y2="92.9" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="81.4" x2="430" y2="81.4" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="70.0" x2="430" y2="70.0" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<text x="26" y="74.0" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">+7</text>
+<text x="26" y="154.0" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">0</text>
+<text x="26" y="245.4" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">−8</text>
+<rect x="54" y="147.0" width="28" height="3.0" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>
+<text x="68" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="101" y="150.0" width="28" height="2.0" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>
+<text x="115" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="148" y="147.5" width="28" height="2.5" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>
+<text x="162" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">0</text>
+<text x="209" y="64.0" text-anchor="middle" font-size="11" fill="currentColor">outlier</text>
+<rect x="195" y="70.0" width="28" height="80.0" fill="currentColor" fill-opacity="0.85"/>
+<text x="209" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">+7</text>
+<rect x="242" y="150.0" width="28" height="1.5" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>
+<text x="256" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="289" y="148.0" width="28" height="2.0" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>
+<text x="303" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="336" y="150.0" width="28" height="3.0" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>
+<text x="350" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">0</text>
+<rect x="383" y="148.5" width="28" height="1.5" fill="none" stroke="currentColor" stroke-dasharray="2 2"/>
+<text x="397" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">0</text>
+<text x="30" y="268" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">code</text>
+<text x="230" y="294" text-anchor="middle" font-size="12.5" fill="currentColor">the outlier stretches the step; 7 of 8 channels round to 0</text>
+</svg>
+<svg class="half" viewBox="0 0 460 306" role="img" aria-label="With a Hadamard rotation: the values spread across the 4-bit grid and every channel keeps a nonzero code.">
+<text x="230" y="26" text-anchor="middle" font-size="14" font-weight="600" fill="currentColor">+ Hadamard: round H·x instead</text>
+<line x1="30" y1="241.4" x2="430" y2="241.4" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="230.0" x2="430" y2="230.0" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="218.6" x2="430" y2="218.6" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="207.1" x2="430" y2="207.1" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="195.7" x2="430" y2="195.7" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="184.3" x2="430" y2="184.3" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="172.9" x2="430" y2="172.9" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="161.4" x2="430" y2="161.4" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="150.0" x2="430" y2="150.0" stroke="currentColor" stroke-opacity="0.45" stroke-width="1"/>
+<line x1="30" y1="138.6" x2="430" y2="138.6" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="127.1" x2="430" y2="127.1" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="115.7" x2="430" y2="115.7" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="104.3" x2="430" y2="104.3" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="92.9" x2="430" y2="92.9" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="81.4" x2="430" y2="81.4" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<line x1="30" y1="70.0" x2="430" y2="70.0" stroke="currentColor" stroke-opacity="0.14" stroke-width="1"/>
+<text x="26" y="74.0" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">+7</text>
+<text x="26" y="154.0" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">0</text>
+<text x="26" y="245.4" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">−8</text>
+<rect x="54" y="71.0" width="28" height="79.0" fill="currentColor" fill-opacity="0.55"/>
+<text x="68" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">+7</text>
+<rect x="101" y="150.0" width="28" height="76.2" fill="currentColor" fill-opacity="0.55"/>
+<text x="115" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">-7</text>
+<rect x="148" y="150.0" width="28" height="75.2" fill="currentColor" fill-opacity="0.55"/>
+<text x="162" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">-7</text>
+<rect x="195" y="70.0" width="28" height="80.0" fill="currentColor" fill-opacity="0.55"/>
+<text x="209" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">+7</text>
+<rect x="242" y="70.0" width="28" height="80.0" fill="currentColor" fill-opacity="0.55"/>
+<text x="256" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">+7</text>
+<rect x="289" y="150.0" width="28" height="61.9" fill="currentColor" fill-opacity="0.55"/>
+<text x="303" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">-5</text>
+<rect x="336" y="150.0" width="28" height="80.0" fill="currentColor" fill-opacity="0.55"/>
+<text x="350" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">-7</text>
+<rect x="383" y="72.9" width="28" height="77.1" fill="currentColor" fill-opacity="0.55"/>
+<text x="397" y="268" text-anchor="middle" font-size="12" fill="currentColor" font-family="ui-monospace,Menlo,monospace">+7</text>
+<text x="30" y="268" text-anchor="end" font-size="11" fill="currentColor" fill-opacity="0.6">code</text>
+<text x="230" y="294" text-anchor="middle" font-size="12.5" fill="currentColor">values spread evenly; all 8 channels use the grid</text>
+</svg></div><figcaption>One group rounded to 4 bits (8 channels shown instead of 64). Without rotation the outlier sets the step and 7 channels round to 0; with rotation all 8 keep a code and the error drops from 7.4% to 3.8%.</figcaption></figure>
+<p><strong>The math, step by step.</strong></p>
+<ol class="steps">
+<li><p>A linear layer maps an input vector to an output vector:</p>
+\[ y = W x, \qquad W \in \mathbb{R}^{m \times n},\; x \in \mathbb{R}^{n} \]</li>
+<li><p>Smoothing moves range from the activations into the weights with one scale per input channel. The product is unchanged:</p>
+\[ y = \underbrace{\big(W\,\mathrm{diag}(s)\big)}_{\hat W}\;\underbrace{\big(\mathrm{diag}(s)^{-1} x\big)}_{\hat x} \]</li>
+<li><p>SVDQuant splits the smoothed weight into a rank-32 part, kept in 16-bit, and a residual \(R\):</p>
+\[ \hat W = L_2 L_1 + R, \qquad L_1 \in \mathbb{R}^{32 \times n}\ \text{(LoRA down)},\quad L_2 \in \mathbb{R}^{m \times 32}\ \text{(LoRA up)} \]</li>
+<li><p>Only the residual path is quantized, both its weights and its activations, to 4 bits:</p>
+\[ y \approx \underbrace{L_2\,(L_1 \hat x)}_{\text{16-bit LoRA}} \;+\; \underbrace{Q(R)\;Q(\hat x)}_{\text{W4A4 GEMM}} \]</li>
+<li><p>Insert an orthonormal matrix \(H\) (so \(H H^\top = I\)) between the residual and its input. This is exact:</p>
+\[ R\,\hat x \;=\; R\,H H^\top \hat x \;=\; (R H)\,(H^\top \hat x) \]</li>
+<li><p>Now quantize the rotated operands instead. \(Q(RH)\) is computed once at load time, and \(H^\top \hat x\) per token inside the kernel; a Hadamard matrix is symmetric, so \(H^\top = H\):</p>
+\[ y \approx L_2\,(L_1 \hat x) \;+\; Q(R H)\;Q(H \hat x) \]</li>
+<li><p>\(H\) is block-diagonal, one \(64 \times 64\) Hadamard block per 4-bit quantization group, so every group keeps its own scale. Each block is applied with a fast Walsh–Hadamard transform in \(\log_2 64 = 6\) add/subtract stages:</p>
+\[ H = \mathrm{diag}\big(H_{64}, \dots, H_{64}\big), \qquad H_{64} = \tfrac{1}{8} \begin{bmatrix} 1 & 1 \\ 1 & -1 \end{bmatrix}^{\otimes 6} \]</li>
+</ol>
+<p><strong>How it is applied here.</strong></p>
+<ul>
+<li><strong>Weights, at load time.</strong> The residual is rotated before rounding, as <code>Q(R · H)</code>. H is block-diagonal with one 64×64 Hadamard block per quantization group, so each group's scale still covers only its own 64 channels. H is a fixed matrix, so no data is needed and the method stays data-free.</li>
+<li><strong>Activations, at run time.</strong> The matching rotation is applied to each token inside the kernel that quantizes activations, as a fast Walsh–Hadamard transform in registers (64 inputs in log₂64 = 6 add/subtract stages). It runs after the smoothing division and after the low-rank projection, so the low-rank branch still sees the original input. This is the same fused online-rotation pattern QuaRot<sup><a class="cite" href="#ref-5">[5]</a></sup> uses for LLMs.</li>
+<li><strong>Why it beats smoothing here.</strong> Smoothing has to choose one scale per channel ahead of time. The rotation needs no statistics: it spreads whatever outlier a token has at run time, which is what per-token outliers require.</li>
+</ul>
+<figure class="diag"><div class="dscroll"><svg viewBox="0 0 900 418" role="img" aria-label="Data flow of one SVDQuant layer, without and with Hadamard rotation. Kernel 1 divides by the smoothing scale, runs the 16-bit LoRA down-projection and rounds activations to 4 bits; kernel 2 runs the W4A4 GEMM against the 4-bit residual weights and adds the 16-bit LoRA up-projection. The rotated version adds a per-token Hadamard transform before rounding and stores the residual weights as Q(R·H).">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+<marker id="ahA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker></defs>
+<text x="10" y="14" font-size="14" font-weight="600" fill="currentColor">SVDQuant</text>
+<rect x="54" y="20" width="392" height="126" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-dasharray="4 4"/>
+<text x="62" y="33" font-size="10.5" fill="currentColor" fill-opacity="0.6">kernel 1 · quantize activations, LoRA down</text>
+<rect x="458" y="20" width="342" height="126" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-dasharray="4 4"/>
+<text x="466" y="33" font-size="10.5" fill="currentColor" fill-opacity="0.6">kernel 2 · W4A4 GEMM, LoRA up</text>
+<text x="34" y="117" text-anchor="end" font-size="14" fill="currentColor" font-style="italic">x</text>
+<line x1="38" y1="112" x2="62" y2="112" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<rect x="62" y="92" width="90" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="107.0" y="109" text-anchor="middle" font-size="12.5" fill="currentColor">÷ s</text><text x="107.0" y="124" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">smoothing</text>
+<line x1="152" y1="112" x2="172" y2="112" stroke="currentColor" stroke-width="1.2"/><circle cx="172" cy="112" r="2.5" fill="currentColor"/>
+<polyline points="172,112 172,57 192,57" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<rect x="192" y="37" width="140" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="262.0" y="54" text-anchor="middle" font-size="12.5" fill="currentColor">LoRA down · L₁</text><text x="262.0" y="69" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">16-bit, to rank 32</text>
+<line x1="332" y1="57" x2="560" y2="57" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<text x="392" y="51" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">rank 32</text>
+<rect x="560" y="37" width="130" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="625.0" y="54" text-anchor="middle" font-size="12.5" fill="currentColor">LoRA up · L₂</text><text x="625.0" y="69" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">16-bit</text>
+<polyline points="690,57 752,57 752,98" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<line x1="172" y1="112" x2="304" y2="112" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<rect x="304" y="92" width="126" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="367.0" y="109" text-anchor="middle" font-size="12.5" fill="currentColor">round to 4-bit</text><text x="367.0" y="124" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">per 64 channels</text>
+<line x1="430" y1="112" x2="476" y2="112" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<rect x="476" y="92" width="150" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="551.0" y="109" text-anchor="middle" font-size="12.5" fill="currentColor">W4A4 GEMM</text><text x="551.0" y="124" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">4-bit act × 4-bit weight</text>
+<line x1="626" y1="112" x2="736" y2="112" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<circle cx="752" cy="112" r="14" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="752" y="117" text-anchor="middle" font-size="16" fill="currentColor">+</text>
+<line x1="766" y1="112" x2="826" y2="112" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<text x="834" y="117" font-size="14" fill="currentColor" font-style="italic">y</text>
+<rect x="476" y="156" width="150" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="551.0" y="173" text-anchor="middle" font-size="12.5" fill="currentColor">Q(R)</text><text x="551.0" y="188" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">residual, rounded</text>
+<line x1="551" y1="156" x2="551" y2="134" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<text x="636" y="181" font-size="10.5" fill="currentColor" fill-opacity="0.65">prepared once at load time</text>
+<line x1="10" y1="206" x2="890" y2="206" stroke="currentColor" stroke-opacity="0.15"/>
+<text x="10" y="226" font-size="14" font-weight="600" fill="currentColor">SVDQuant + Hadamard rotation</text>
+<rect x="640" y="215" width="22" height="14" rx="3" style="fill:none;stroke:var(--accent);stroke-width:2"/>
+<text x="670" y="226" font-size="12" fill="currentColor">added by the Hadamard rotation</text>
+<rect x="54" y="232" width="392" height="126" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-dasharray="4 4"/>
+<text x="62" y="245" font-size="10.5" fill="currentColor" fill-opacity="0.6">kernel 1 · quantize activations, LoRA down</text>
+<rect x="458" y="232" width="342" height="126" rx="6" fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-dasharray="4 4"/>
+<text x="466" y="245" font-size="10.5" fill="currentColor" fill-opacity="0.6">kernel 2 · W4A4 GEMM, LoRA up</text>
+<text x="34" y="329" text-anchor="end" font-size="14" fill="currentColor" font-style="italic">x</text>
+<line x1="38" y1="324" x2="62" y2="324" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<rect x="62" y="304" width="90" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="107.0" y="321" text-anchor="middle" font-size="12.5" fill="currentColor">÷ s</text><text x="107.0" y="336" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">smoothing</text>
+<line x1="152" y1="324" x2="172" y2="324" stroke="currentColor" stroke-width="1.2"/><circle cx="172" cy="324" r="2.5" fill="currentColor"/>
+<polyline points="172,324 172,269 192,269" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<rect x="192" y="249" width="140" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="262.0" y="266" text-anchor="middle" font-size="12.5" fill="currentColor">LoRA down · L₁</text><text x="262.0" y="281" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">16-bit, to rank 32</text>
+<line x1="332" y1="269" x2="560" y2="269" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<text x="392" y="263" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">rank 32</text>
+<rect x="560" y="249" width="130" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="625.0" y="266" text-anchor="middle" font-size="12.5" fill="currentColor">LoRA up · L₂</text><text x="625.0" y="281" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">16-bit</text>
+<polyline points="690,269 752,269 752,310" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<line x1="172" y1="324" x2="192" y2="324" style="stroke:var(--accent);stroke-width:1.6" marker-end="url(#ahA)"/>
+<rect x="192" y="304" width="92" height="40" rx="4" style="fill:none;stroke:var(--accent);stroke-width:2"/><text x="238.0" y="321" text-anchor="middle" font-size="12.5" fill="currentColor">× H</text><text x="238.0" y="336" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">per token</text>
+<line x1="284" y1="324" x2="304" y2="324" style="stroke:var(--accent);stroke-width:1.6" marker-end="url(#ahA)"/>
+<rect x="304" y="304" width="126" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="367.0" y="321" text-anchor="middle" font-size="12.5" fill="currentColor">round to 4-bit</text><text x="367.0" y="336" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">per 64 channels</text>
+<line x1="430" y1="324" x2="476" y2="324" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<rect x="476" y="304" width="150" height="40" rx="4" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="551.0" y="321" text-anchor="middle" font-size="12.5" fill="currentColor">W4A4 GEMM</text><text x="551.0" y="336" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">4-bit act × 4-bit weight</text>
+<line x1="626" y1="324" x2="736" y2="324" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<circle cx="752" cy="324" r="14" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="752" y="329" text-anchor="middle" font-size="16" fill="currentColor">+</text>
+<line x1="766" y1="324" x2="826" y2="324" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah)"/>
+<text x="834" y="329" font-size="14" fill="currentColor" font-style="italic">y</text>
+<rect x="476" y="368" width="150" height="40" rx="4" style="fill:none;stroke:var(--accent);stroke-width:2"/><text x="551.0" y="385" text-anchor="middle" font-size="12.5" fill="currentColor">Q(R·H)</text><text x="551.0" y="400" text-anchor="middle" font-size="10.5" fill="currentColor" fill-opacity="0.65">residual, rotated then rounded</text>
+<line x1="551" y1="368" x2="551" y2="346" style="stroke:var(--accent);stroke-width:1.6" marker-end="url(#ahA)"/>
+<text x="636" y="393" font-size="10.5" fill="currentColor" fill-opacity="0.65">prepared once at load time</text>
+</svg></div><figcaption>One layer as two fused kernels. Rotation adds only the highlighted parts: × H on each token before rounding, and weights stored as Q(R·H). The LoRA branch is unchanged.</figcaption></figure>
+<p><strong>Why it does not help nvfp4.</strong> nvfp4 already gives every 16 channels their own fine-grained scale, and its 4-bit floating-point grid is built for heavy-tailed values. A 64-wide rotation mixes four of those small groups together and removes the tails the format handles well. Egiazarian et al.<sup><a class="cite" href="#ref-7">[7]</a></sup> show that nvfp4's small groups neutralize classic outlier treatments, and they use smaller block-wise rotations tuned to the format instead. That matches the −2.2 dB measured here.</p>
+<h3 id="end-to-end-numbers">End-to-end numbers</h3>
+<div class="tbl"><table>
+<tr><th>run</th><th class="n">PSNR <span class="dir" title="higher is better">↑</span></th><th class="n">SSIM <span class="dir" title="higher is better">↑</span></th><th class="n">flicker <span class="dir" title="lower is better">↓</span> · LPIPS <span class="dir" title="lower is better">↓</span> · identity <span class="dir" title="higher is better">↑</span></th><th class="n">inference <span class="dir" title="lower is better">↓</span></th><th class="n">transformer <span class="dir" title="lower is better">↓</span></th></tr>
+<tr><td>LTX-2.3-Distilled · int4 r32 + H64, smoothing off (A100)</td><td class="n good">15.42 ± 3.76</td><td class="n good">0.539</td><td class="n good">7.96</td><td class="n">57.6 s / 5 clips</td><td class="n">10.6 GB</td></tr>
+<tr><td>LTX-2.3-Distilled · int4 r32, rotation off, same kernel (control)</td><td class="n">13.70 ± 3.14</td><td class="n">0.434</td><td class="n">9.03</td><td class="n">57.2 s</td><td class="n">10.6 GB</td></tr>
+<tr><td>LTX-2.3-Distilled · int4 r128 + H64, smoothing off</td><td class="n">14.28 ± 4.40</td><td class="n">0.481</td><td class="n">7.78</td><td class="n">59.3 s</td><td class="n">12.3 GB</td></tr>
+<tr><td>LTX-2.3-Distilled · previous best, int4 r128 e0.25, no rotation</td><td class="n">15.99 ± 4.87</td><td class="n">0.54</td><td class="n">—</td><td class="n">≈59 s</td><td class="n">12.3 GB</td></tr>
+<tr><td>LTX-2.3-Distilled · bf16 reference flicker</td><td class="n">—</td><td class="n">—</td><td class="n">6.39</td><td class="n">—</td><td class="n">35.4 GB</td></tr>
+<tr><td>MiniMax-H3 · int4 r32 + H64 (A100)</td><td class="n good">15.64 ± 1.85</td><td class="n good">0.529</td><td class="n">0.185 / 0.56</td><td class="n">2005 s / 5 clips</td><td class="n">17.1 GB</td></tr>
+<tr><td>MiniMax-H3 · int4 r32 plain</td><td class="n">14.52 ± 1.14</td><td class="n">0.457</td><td class="n">0.214 / 0.58</td><td class="n">2021 s</td><td class="n">17.1 GB</td></tr>
+<tr><td>MiniMax-H3 · nvfp4 r32 + H64 (RTX)</td><td class="n bad">13.66 ± 1.49</td><td class="n bad">0.469</td><td class="n bad">0.209 / 0.46</td><td class="n">—</td><td class="n">18.1 GB</td></tr>
+<tr><td>MiniMax-H3 · nvfp4 r32 plain</td><td class="n">15.87 ± 2.01</td><td class="n">0.542</td><td class="n">0.107 / 0.17</td><td class="n">924 s</td><td class="n">18.1 GB</td></tr>
+<tr><td>MiniMax-H3 · bf16 reference flicker</td><td class="n">—</td><td class="n">—</td><td class="n">0.12 / 0.26–0.29</td><td class="n">—</td><td class="n">61.7 GB</td></tr>
+<tr><td>Qwen-Image-2.1 · int4 r32 + H64, CFG off / 2.5 / 4 (RTX)</td><td class="n good">22.81 / 20.75 / 20.17</td><td class="n good">0.886 / 0.800 / 0.790</td><td class="n">LPIPS 0.18 / 0.22 / 0.22</td><td class="n">134 s / 269 s per image</td><td class="n">3.86 GB</td></tr>
+<tr><td>Qwen-Image-2.1 · int4 r32 plain (earlier run, shared GPU)</td><td class="n">20.45 / 18.44 / 16.93</td><td class="n">0.820 / 0.726 / 0.710</td><td class="n">LPIPS 0.26 / 0.36 / 0.36</td><td class="n">273 s / ~570 s</td><td class="n">3.86 GB</td></tr>
+<tr><td>Qwen-Image-2.1 · nvfp4 r32 plain</td><td class="n">22.74 / 21.56 / 20.97</td><td class="n">0.894 / 0.834 / 0.841</td><td class="n">LPIPS 0.17 / 0.21 / 0.18</td><td class="n">92 s / ~165 s</td><td class="n">4.07 GB</td></tr>
+<tr><td>Qwen-Image-2.1 edits (12) · int4 r32 + H64, CFG off / 2.5 / 4</td><td class="n good">23.43 / 23.60 / 22.22</td><td class="n good">0.867 / 0.862 / 0.820</td><td class="n">LPIPS 0.14 / 0.14 / 0.18 · identity 0.89 / 0.78 / 0.76</td><td class="n">34 s / 68 s per edit</td><td class="n">3.86 GB</td></tr>
+<tr><td>Qwen-Image-2.1 edits · int4 r32 plain</td><td class="n">21.84 / 21.84 / 21.38</td><td class="n">0.836 / 0.827 / 0.783</td><td class="n">LPIPS 0.19 / 0.18 / 0.23 · identity 0.79 / 0.72 / 0.70</td><td class="n">81 s / ~190 s</td><td class="n">3.86 GB</td></tr>
+<tr><td>Qwen-Image-2.1 edits · nvfp4 r32 plain</td><td class="n">25.27 / 23.39 / 23.00</td><td class="n">0.889 / 0.856 / 0.843</td><td class="n">LPIPS 0.11 / 0.15 / 0.16 · identity 0.89 / 0.85 / 0.77</td><td class="n">39 s / ~75 s</td><td class="n">4.07 GB</td></tr>
+</table></div>
+<p>Flicker <span class="dir" title="lower is better">↓</span>: on LTX it is mean |Laplacian| of frame differences (bf16 itself scores 6.39). MiniMax flicker is the period-4 power fraction, shown as mean / worst scene. Rotated int4 at rank 32 matches the old rank-128 best within noise at the default memory footprint. Qwen timings are not comparable across rows: the rotated run had the GPU to itself, the others shared it with other jobs.</p>
+
+<h3 id="visual-comparison-ltx-2-3-distilled-same-kernel-">Visual comparison: LTX-2.3-Distilled, same kernel, rotation off vs on</h3>
+<div class="vc" data-group="h_ltx"></div>
+<p class="vcap">The control uses the same kernel build and seeds with the rotation off; H64 changes nothing else. With rotation the drummer loses the headphones and regains bf16's framing, the car stays on the crossing with pedestrians instead of drifting into traffic, the dog's pose and the tree line move back toward bf16, and the fireworks count matches. The second row repeats H64 next to rank 128 + H64: adding rank 128 on top drifts again, because the two treatments compete for the same outlier energy.</p>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/h_ltx_rain.webp" alt="LTX rain scene crop"><figcaption>LTX-2.3-Distilled rain scene, 2× crop: bf16, int4 without rotation, int4 with rotation. Rotation brings back the pedestrians, umbrella and storefronts.</figcaption></figure>
+
+<h3 id="visual-comparison-minimax-h3-2">Visual comparison: MiniMax-H3</h3>
+<div class="vc" data-group="h_minimax"></div>
+<p class="vcap">Rotation pulls int4's drummer framing, dog pose and fireworks shape back toward the A100 reference. The second row is plain nvfp4, without rotation, against its RTX reference: rotated int4 (15.6 dB) lands at about the same distance from its reference as nvfp4 does (15.9 dB). On the ocean scene at 0.25×, int4's frame-to-frame pulsing is the easiest thing to see; plain nvfp4 is already close to bf16 there.</p>
+
+<h3 id="visual-comparison-qwen-image-2-1-text-to-image-a">Visual comparison: Qwen-Image-2.1, text-to-image across CFG</h3>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_sample0.webp" alt="Qwen sample 0 with rotation row"><figcaption>Qwen-Image-2.1: rows bf16 / nvfp4 / int4 / int4 + H64. Rotation restores the beanie and sign placement that plain int4 loses.</figcaption></figure>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_sample3.webp" alt="Qwen sample 3 with rotation row"><figcaption>Plain int4 leaves the frisbee floating; rotated int4 puts it back in the dog's mouth, as in bf16.</figcaption></figure>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit3.webp" alt="Qwen edit 3 with rotation row"><figcaption>Qwen-Image-2.1 edit. Rotated int4 keeps the leaping pose that plain int4 shifts.</figcaption></figure>
+
+<h3 id="all-qwen-image-2-1-sheets-with-the-rotation-row">All Qwen-Image-2.1 sheets with the rotation row</h3>
+<p>Every sheet has rows bf16 / nvfp4 / int4 / int4 + H64 and columns CFG off / 2.5 / 4, with nvfp4 in its plain form (no rotation), with PSNR <span class="dir" title="higher is better">↑</span> and LPIPS <span class="dir" title="lower is better">↓</span> against bf16 on each quantized tile. Click any sheet on this page to view it at full size; click again or press Escape to close.</p>
+<details><summary>Text-to-image, 5 prompts (2048², 40 steps)</summary>
+<div class="gal">
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_sample0.webp" aria-label="Open Qwen text-to-image sheet 0 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_sample0.webp" alt="Qwen text-to-image sheet 0" loading="lazy" decoding="async" width="640"></button><figcaption>sample0: A street musician playing saxophone under a lamppost, holding a cardboard sign that says OPEN MIC, warm evening light.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_sample1.webp" aria-label="Open Qwen text-to-image sheet 1 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_sample1.webp" alt="Qwen text-to-image sheet 1" loading="lazy" decoding="async" width="640"></button><figcaption>sample1: A misty mountain valley at sunrise, a winding river reflecting golden clouds, pine forests on the slopes.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_sample2.webp" aria-label="Open Qwen text-to-image sheet 2 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_sample2.webp" alt="Qwen text-to-image sheet 2" loading="lazy" decoding="async" width="640"></button><figcaption>sample2: A rainy neon-lit city street at night, reflections on wet asphalt, people with umbrellas, cinematic.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_sample3.webp" aria-label="Open Qwen text-to-image sheet 3 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_sample3.webp" alt="Qwen text-to-image sheet 3" loading="lazy" decoding="async" width="640"></button><figcaption>sample3: A golden retriever mid-leap catching a frisbee in a sunlit meadow, motion blur in the grass.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_sample4.webp" aria-label="Open Qwen text-to-image sheet 4 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_sample4.webp" alt="Qwen text-to-image sheet 4" loading="lazy" decoding="async" width="640"></button><figcaption>sample4: A still life of oranges, a ceramic teapot and lace cloth on a wooden table, dramatic window light, fine texture.</figcaption></figure>
+</div></details>
+<details><summary>Edits, 12 instructions (own edits 0–4, identity edit 5, blog Fidelity pairs 6–11)</summary>
+<div class="gal">
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit0.webp" aria-label="Open Qwen edit sheet 0 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit0.webp" alt="Qwen edit sheet 0" loading="lazy" decoding="async" width="640"></button><figcaption>edit0 (T2I sample 0): Change the text on the cardboard sign to say JAZZ TONIGHT.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit1.webp" aria-label="Open Qwen edit sheet 1 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit1.webp" alt="Qwen edit sheet 1" loading="lazy" decoding="async" width="640"></button><figcaption>edit1 (T2I sample 1): Add a red hot-air balloon floating above the river.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit2.webp" aria-label="Open Qwen edit sheet 2 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit2.webp" alt="Qwen edit sheet 2" loading="lazy" decoding="async" width="640"></button><figcaption>edit2 (T2I sample 2): Turn the rain into a snowy winter night, with snow covering the street and the umbrellas.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit3.webp" aria-label="Open Qwen edit sheet 3 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit3.webp" alt="Qwen edit sheet 3" loading="lazy" decoding="async" width="640"></button><figcaption>edit3 (T2I sample 3): Replace the golden retriever with a black labrador, keeping the frisbee and the leaping pose.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit4.webp" aria-label="Open Qwen edit sheet 4 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit4.webp" alt="Qwen edit sheet 4" loading="lazy" decoding="async" width="640"></button><figcaption>edit4 (T2I sample 4): Change the oranges into green apples and make the teapot cobalt blue.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit5.webp" aria-label="Open Qwen edit sheet 5 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit5.webp" alt="Qwen edit sheet 5" loading="lazy" decoding="async" width="640"></button><figcaption>edit5 (T2I sample 0): Keep the man's face and identity exactly the same; put him in a white suit on a concert stage under spotlights.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit6.webp" aria-label="Open Qwen edit sheet 6 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit6.webp" alt="Qwen edit sheet 6" loading="lazy" decoding="async" width="640"></button><figcaption>edit6 (blog_example-25.png): Show this woman full-body, walking along a wooden boardwalk through a mangrove forest, wearing a white T-shirt and khaki cargo pants, holding a straw hat.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit7.webp" aria-label="Open Qwen edit sheet 7 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit7.webp" alt="Qwen edit sheet 7" loading="lazy" decoding="async" width="640"></button><figcaption>edit7 (blog_example-27.png): Change her hairstyle to long, loose wavy hair falling over her shoulders; keep everything else the same.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit8.webp" aria-label="Open Qwen edit sheet 8 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit8.webp" alt="Qwen edit sheet 8" loading="lazy" decoding="async" width="640"></button><figcaption>edit8 (blog_example-29.png): Show her sitting in a cozy living room, smiling while opening a cardboard package, wearing the same sweater and scarf.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit9.webp" aria-label="Open Qwen edit sheet 9 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit9.webp" alt="Qwen edit sheet 9" loading="lazy" decoding="async" width="640"></button><figcaption>edit9 (blog_example-31.png): Place this foundation bottle on a wooden table by a sunny window, next to a cup of tea and a plate of strawberries.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit10.webp" aria-label="Open Qwen edit sheet 10 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit10.webp" alt="Qwen edit sheet 10" loading="lazy" decoding="async" width="640"></button><figcaption>edit10 (blog_example-33.png): Show this dress worn by a woman standing full-body in a warm-toned studio.</figcaption></figure>
+<figure class="g"><button type="button" class="zoom" data-src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/qwen_h4_edit11.webp" aria-label="Open Qwen edit sheet 11 at full size"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/page/thumb_qwen_h4_edit11.webp" alt="Qwen edit sheet 11" loading="lazy" decoding="async" width="640"></button><figcaption>edit11 (blog_example-35.png): Show this bracelet worn on a woman's wrist as she sits at a wooden table with a teapot, wearing a linen blouse.</figcaption></figure>
+</div></details>
+
+<h3 id="rules-learned">Rules learned</h3>
+<ul>
+<li><strong>int4 only.</strong> On nvfp4 it costs 2.2 dB and doubles flicker. The kernel option is validated for int4 and must stay off for nvfp4.</li>
+<li><strong>Rank 32, smoothing off.</strong> Rotation and rank do not stack (r128 + H64 is 1.1 dB below r32 + H64), and smoothing on top of rotation lowers activation SNR. Recommended config: <code>rank=32, hadamard=True, smooth_exponent=0</code>.</li>
+<li><strong>Pre-Blackwell hardware reaches nvfp4-class quality.</strong> A100 int4 + H64 (15.64) ≈ RTX nvfp4 (15.87) on MiniMax, at the same runtime as plain int4. On Qwen-Image-2.1 rotated int4 ties nvfp4 at CFG off (22.8 vs 22.7) and sits 0.8 dB below it under CFG, within 0.04 LPIPS.</li>
+<li><strong>It removes most of int4's CFG sensitivity on Qwen.</strong> Plain int4 lost 3.5 dB from CFG off to CFG 4; rotated int4 loses 2.6, about what nvfp4 loses. The compositions int4 forked come back.</li>
+<li><strong>Not a flicker cure.</strong> Mean flicker improves; the worst scene does not.</li>
+<li><strong>Variants already tested with no extra gain</strong>: sign-flipped H64, H128. Random permutation is the only untested piece of the OrbitQuant family.</li>
+</ul>
+
+<h3 id="references">References</h3>
+<ol class="refs"><li id="ref-1">Muyang Li et al., 2024. <em>SVDQuant: Absorbing Outliers by Low-Rank Components for 4-Bit Diffusion Models</em>. <a href="https://arxiv.org/abs/2411.05007" target="_blank" rel="noopener">arXiv:2411.05007</a></li><li id="ref-2">Guangxuan Xiao et al., 2022. <em>SmoothQuant: Accurate and Efficient Post-Training Quantization for Large Language Models</em>. <a href="https://arxiv.org/abs/2211.10438" target="_blank" rel="noopener">arXiv:2211.10438</a></li><li id="ref-3">Jerry Chee et al., 2023. <em>QuIP: 2-Bit Quantization of Large Language Models With Guarantees</em>. <a href="https://arxiv.org/abs/2307.13304" target="_blank" rel="noopener">arXiv:2307.13304</a></li><li id="ref-4">Albert Tseng et al., 2024. <em>QuIP#: Even Better LLM Quantization with Hadamard Incoherence and Lattice Codebooks</em>. <a href="https://arxiv.org/abs/2402.04396" target="_blank" rel="noopener">arXiv:2402.04396</a></li><li id="ref-5">Saleh Ashkboos et al., 2024. <em>QuaRot: Outlier-Free 4-Bit Inference in Rotated LLMs</em>. <a href="https://arxiv.org/abs/2404.00456" target="_blank" rel="noopener">arXiv:2404.00456</a></li><li id="ref-6">Zechun Liu et al., 2024. <em>SpinQuant: LLM quantization with learned rotations</em>. <a href="https://arxiv.org/abs/2405.16406" target="_blank" rel="noopener">arXiv:2405.16406</a></li><li id="ref-7">Vage Egiazarian et al., 2025. <em>Bridging the Gap Between Promise and Performance for Microscaling FP4 Quantization</em>. <a href="https://arxiv.org/abs/2509.23202" target="_blank" rel="noopener">arXiv:2509.23202</a></li></ol>
+<h2 id="tested-and-negative">Tested and negative</h2>
+<ul>
+<li>LoftQ alternating SVD/quantize iteration: 4.6 to 11.1% reconstruction gain, below the pre-registered gate.</li>
+<li>Excluding the 288 worst layers (+3.5 GB, no effect; error is systemic). Decode-timestep dither (does not mask flicker).</li>
+<li>Activation scales derived from AdaLN modulation weights (helps only cross-modal to_q, hurts attn1).</li>
+<li>Frame-shared activation scales (+2.5 to 5 pts error, +75% jitter). DCT on all linears (harmful for nvfp4).</li>
+<li>AdaLN is not an error source on MiniMax (see the calibrated section).</li>
+</ul>
+
+<h2 id="recommended-configs">Recommended configs</h2>
+<div class="tbl"><table>
+<tr><th>target</th><th>config</th><th>note</th></tr>
+<tr><td>Blackwell</td><td><code>nvfp4, rank 32, smooth_exponent 0.5</code></td><td>Never add hadamard. Fastest and best quality everywhere.</td></tr>
+<tr><td>A100 and older (int4)</td><td><code>int4, rank 32, hadamard=True, smooth_exponent 0</code></td><td>Reaches nvfp4-class fidelity on LTX, MiniMax and Qwen-Image-2.1. Needs the <code>hadamard</code> kernel branch published.</td></tr>
+</table></div>
+
+<h2 id="code-samples">Code samples</h2>
+<p>Each sample is a complete script: it quantizes the transformer while it loads, with no calibration data, then generates one image. Quantizing takes roughly 5 to 20 minutes depending on model size. The examples use Qwen-Image-2.1; other models work the same way with their own transformer and pipeline classes.</p>
+<h3 id="setup">Setup</h3>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash"># Data-free quantize-on-load lives on branch feature/data-free-quantization of rootonchair/diffusers.
+# Qwen-Image-2.1 also needs upstream main merged in.
+pip install &quot;git+https://github.com/rootonchair/diffusers@feature/data-free-quantization&quot; kernels
+export DIFFUSERS_TRUST_REMOTE_KERNELS=true   # loads rootonchair/nunchaku-lite-kernels from the Hub</code></pre></div>
+<h3 id="nvfp4">nvfp4</h3>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># nvfp4: Blackwell GPUs only. Best quality, no tuning needed.
+import torch
+from diffusers import NunchakuLiteQuantizationConfig, QwenImage21Pipeline, QwenImage21Transformer2DModel
+
+model_id = &quot;Qwen/Qwen-Image-2.1&quot;
+
+# Quantize the transformer while it loads. pre_quantized=False means data-free:
+# no calibration data, the 4-bit weights are computed from the bf16 checkpoint.
+quantization_config = NunchakuLiteQuantizationConfig(
+    svdq_w4a4={
+        &quot;precision&quot;: &quot;nvfp4&quot;,
+        &quot;group_size&quot;: 16,  # fixed for nvfp4
+        &quot;rank&quot;: 32,        # size of the 16-bit low-rank branch
+    },
+    pre_quantized=False,
+)
+transformer = QwenImage21Transformer2DModel.from_pretrained(
+    model_id,
+    subfolder=&quot;transformer&quot;,
+    quantization_config=quantization_config,
+    dtype=torch.bfloat16,
+    device_map=&quot;cuda&quot;,
+)
+
+# The rest of the pipeline (text encoder, VAE) stays in bf16.
+pipe = QwenImage21Pipeline.from_pretrained(model_id, transformer=transformer, dtype=torch.bfloat16)
+pipe.to(&quot;cuda&quot;)
+
+image = pipe(
+    prompt=&quot;A street musician playing saxophone under a lamppost, holding a cardboard sign that says OPEN MIC, warm evening light.&quot;,
+    num_inference_steps=40,
+    generator=torch.Generator(&quot;cuda&quot;).manual_seed(42),
+).images[0]
+image.save(&quot;qwen_nvfp4.png&quot;)</code></pre></div>
+<h3 id="int4">int4</h3>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># int4: runs on A100 and older GPUs.
+import torch
+from diffusers import NunchakuLiteQuantizationConfig, QwenImage21Pipeline, QwenImage21Transformer2DModel
+
+model_id = &quot;Qwen/Qwen-Image-2.1&quot;
+
+# Quantize the transformer while it loads. pre_quantized=False means data-free:
+# no calibration data, the 4-bit weights are computed from the bf16 checkpoint.
+quantization_config = NunchakuLiteQuantizationConfig(
+    svdq_w4a4={
+        &quot;precision&quot;: &quot;int4&quot;,
+        &quot;group_size&quot;: 64,  # fixed for int4
+        &quot;rank&quot;: 32,        # size of the 16-bit low-rank branch
+    },
+    pre_quantized=False,
+)
+transformer = QwenImage21Transformer2DModel.from_pretrained(
+    model_id,
+    subfolder=&quot;transformer&quot;,
+    quantization_config=quantization_config,
+    dtype=torch.bfloat16,
+    device_map=&quot;cuda&quot;,
+)
+
+# The rest of the pipeline (text encoder, VAE) stays in bf16.
+pipe = QwenImage21Pipeline.from_pretrained(model_id, transformer=transformer, dtype=torch.bfloat16)
+pipe.to(&quot;cuda&quot;)
+
+image = pipe(
+    prompt=&quot;A street musician playing saxophone under a lamppost, holding a cardboard sign that says OPEN MIC, warm evening light.&quot;,
+    num_inference_steps=40,
+    generator=torch.Generator(&quot;cuda&quot;).manual_seed(42),
+).images[0]
+image.save(&quot;qwen_int4.png&quot;)</code></pre></div>
+<h3 id="int4-with-hadamard-rotation">int4 with Hadamard rotation</h3>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash"># Hadamard rotation needs branch feature/hadamard-rotation and a kernel build with the online transform
+# (kernel branch &quot;hadamard&quot; of rootonchair/nunchaku_lite; builds exist for A100 and Blackwell).
+pip install &quot;git+https://github.com/rootonchair/diffusers@feature/hadamard-rotation&quot;
+pip install nunchaku_lite_kernels-0.1.1+cu12.8torch2.11-cp312-cp312-linux_x86_64.whl
+export NUNCHAKU_LITE_LOCAL_KERNELS=1   # use the installed kernel instead of the Hub build</code></pre></div>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># int4 + Hadamard rotation: the recommended int4 setting. Never use rotation with nvfp4.
+import torch
+from diffusers import NunchakuLiteQuantizationConfig, QwenImage21Pipeline, QwenImage21Transformer2DModel
+
+model_id = &quot;Qwen/Qwen-Image-2.1&quot;
+
+# Quantize the transformer while it loads. pre_quantized=False means data-free:
+# no calibration data, the 4-bit weights are computed from the bf16 checkpoint.
+quantization_config = NunchakuLiteQuantizationConfig(
+    svdq_w4a4={
+        &quot;precision&quot;: &quot;int4&quot;,
+        &quot;group_size&quot;: 64,
+        &quot;rank&quot;: 32,
+        &quot;hadamard&quot;: True,        # rotate the residual and the activations in 64-channel blocks
+        &quot;smooth_exponent&quot;: 0.0,  # smoothing off; rotation replaces it
+    },
+    pre_quantized=False,
+)
+transformer = QwenImage21Transformer2DModel.from_pretrained(
+    model_id,
+    subfolder=&quot;transformer&quot;,
+    quantization_config=quantization_config,
+    dtype=torch.bfloat16,
+    device_map=&quot;cuda&quot;,
+)
+
+# The rest of the pipeline (text encoder, VAE) stays in bf16.
+pipe = QwenImage21Pipeline.from_pretrained(model_id, transformer=transformer, dtype=torch.bfloat16)
+pipe.to(&quot;cuda&quot;)
+
+image = pipe(
+    prompt=&quot;A street musician playing saxophone under a lamppost, holding a cardboard sign that says OPEN MIC, warm evening light.&quot;,
+    num_inference_steps=40,
+    generator=torch.Generator(&quot;cuda&quot;).manual_seed(42),
+).images[0]
+image.save(&quot;qwen_int4_hadamard.png&quot;)</code></pre></div>
+<h3 id="changing-rank-and-smoothing">Changing rank and smoothing</h3>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># int4 with a larger rank and retuned smoothing (best LTX int4 setting without rotation: +2.7 dB, +16% memory).
+import torch
+from diffusers import NunchakuLiteQuantizationConfig, QwenImage21Pipeline, QwenImage21Transformer2DModel
+
+model_id = &quot;Qwen/Qwen-Image-2.1&quot;
+
+# Quantize the transformer while it loads. pre_quantized=False means data-free:
+# no calibration data, the 4-bit weights are computed from the bf16 checkpoint.
+quantization_config = NunchakuLiteQuantizationConfig(
+    svdq_w4a4={
+        &quot;precision&quot;: &quot;int4&quot;,
+        &quot;group_size&quot;: 64,
+        &quot;rank&quot;: 128,              # default 32; larger = more memory, same speed
+        &quot;smooth_exponent&quot;: 0.25,  # default 0.5; 0 = off, 1 = fully flattened
+    },
+    pre_quantized=False,
+)
+transformer = QwenImage21Transformer2DModel.from_pretrained(
+    model_id,
+    subfolder=&quot;transformer&quot;,
+    quantization_config=quantization_config,
+    dtype=torch.bfloat16,
+    device_map=&quot;cuda&quot;,
+)
+
+# The rest of the pipeline (text encoder, VAE) stays in bf16.
+pipe = QwenImage21Pipeline.from_pretrained(model_id, transformer=transformer, dtype=torch.bfloat16)
+pipe.to(&quot;cuda&quot;)
+
+image = pipe(
+    prompt=&quot;A street musician playing saxophone under a lamppost, holding a cardboard sign that says OPEN MIC, warm evening light.&quot;,
+    num_inference_steps=40,
+    generator=torch.Generator(&quot;cuda&quot;).manual_seed(42),
+).images[0]
+image.save(&quot;qwen_int4_rank128.png&quot;)</code></pre></div>
+<ul>
+<li><code>group_size</code> is fixed by precision: 16 for nvfp4, 64 for int4. Any other value is rejected.</li>
+<li><code>rank</code> is required. <code>smooth_exponent</code> (0 to 1, default 0.5) and <code>hadamard</code> are optional and apply only when <code>pre_quantized=False</code>.</li>
+<li>At rank 32, smoothing makes no measurable difference, so <code>"smooth_exponent": 0.0</code> or leaving it out are equivalent in quality.</li>
+<li>Quantized layers are chosen automatically. To keep specific layers in bf16, pass <code>exclude_targets=[...]</code> to the config.</li>
+</ul>
+
+</div>
+<div id="viewer" hidden role="dialog" aria-modal="true" aria-label="Full-size sheet"><span class="hint">click image: actual size · click outside or Esc: close</span><img id="viewer-img" alt=""></div>
+<script>window.MathJax={tex:{inlineMath:[['\\(','\\)']],displayMath:[['\\[','\\]']]},options:{skipHtmlTags:['script','noscript','style','textarea','pre','code']}};</script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-chtml.min.js"></script>
+<script id="vman" type="application/json">{"ltx_distilled": {"title": "LTX-2.3-Distilled, 768\u00d7512, 121 frames, 8 steps", "scenes": ["drummer", "ocean waves", "rainy street", "retriever", "fireworks"], "ar": "768/512", "cols": 3, "arms": [{"label": "bf16 (A100 ref)", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s4.webp"]}, {"label": "int4 r32 default \u00b7 13.3 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s4.webp"]}, {"label": "int4 r128 e0.25 \u00b7 16.0 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4-r128-e025/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4-r128-e025/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4-r128-e025/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4-r128-e025/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4-r128-e025/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4-r128-e025/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4-r128-e025/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4-r128-e025/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4-r128-e025/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4-r128-e025/s4.webp"]}, {"label": "bf16 (RTX ref)", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s4.webp"]}, {"label": "nvfp4 r32 \u00b7 17.3 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s4.webp"]}]}, "minimax": {"title": "MiniMax-H3, 960\u00d7544, 124 frames, joint audio", "scenes": ["drummer", "ocean waves", "rainy street", "retriever", "fireworks"], "ar": "960/544", "cols": 2, "arms": [{"label": "bf16 (RTX ref)", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s4.webp"]}, {"label": "nvfp4 r32 \u00b7 15.9 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s4.webp"]}, {"label": "bf16 (A100 ref)", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s4.webp"]}, {"label": "int4 r32 \u00b7 14.5 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s4.webp"]}]}, "cal_ltx": {"title": "LTX-2.3-Distilled, calibrated lite-infer checkpoints vs data-free", "scenes": ["drummer", "ocean waves", "rainy street", "retriever", "fireworks"], "ar": "768/512", "cols": 3, "arms": [{"label": "bf16 (A100 ref)", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s4.webp"]}, {"label": "calibrated int4, lite-infer \u00b7 12.6 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-int4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-int4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-int4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-int4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-int4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-int4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-int4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-int4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-int4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-int4/s4.webp"]}, {"label": "data-free int4 r32 \u00b7 13.3 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-int4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-int4/s4.webp"]}, {"label": "bf16 (RTX ref)", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-rtx/s4.webp"]}, {"label": "calibrated nvfp4, lite-infer \u00b7 15.3 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-nvfp4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-nvfp4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-nvfp4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-nvfp4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-prequant-nvfp4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-nvfp4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-nvfp4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-nvfp4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-nvfp4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-prequant-nvfp4/s4.webp"]}, {"label": "data-free nvfp4 r32 \u00b7 17.3 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-datafree-nvfp4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-datafree-nvfp4/s4.webp"]}]}, "cal_minimax": {"title": "MiniMax-H3, calibrated 8\u00d720 vs data-free, same box and embeddings", "scenes": ["drummer", "ocean waves", "rainy street", "retriever", "fireworks"], "ar": "960/544", "cols": 3, "arms": [{"label": "bf16 (RTX ref)", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s4.webp"]}, {"label": "calibrated 8\u00d720 nvfp4 \u00b7 15.2 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-nvfp4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-nvfp4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-nvfp4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-nvfp4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-nvfp4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-nvfp4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-nvfp4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-nvfp4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-nvfp4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-nvfp4/s4.webp"]}, {"label": "data-free nvfp4 r32 \u00b7 15.7 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-nvfp4-cpuemb/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-nvfp4-cpuemb/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-nvfp4-cpuemb/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-nvfp4-cpuemb/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-nvfp4-cpuemb/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-nvfp4-cpuemb/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-nvfp4-cpuemb/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-nvfp4-cpuemb/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-nvfp4-cpuemb/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-nvfp4-cpuemb/s4.webp"]}, {"label": "bf16 (RTX ref)", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s4.webp"]}, {"label": "calibrated 8\u00d720 int4 \u00b7 13.9 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-int4/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-int4/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-int4/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-int4/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-cal8x20-int4/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-int4/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-int4/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-int4/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-int4/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-cal8x20-int4/s4.webp"]}, {"label": "data-free int4 r32 \u00b7 14.5 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-int4-cpuemb/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-int4-cpuemb/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-int4-cpuemb/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-int4-cpuemb/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-df-int4-cpuemb/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-int4-cpuemb/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-int4-cpuemb/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-int4-cpuemb/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-int4-cpuemb/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-df-int4-cpuemb/s4.webp"]}]}, "h_ltx": {"title": "LTX-2.3-Distilled, same kernel, rotation off vs on", "scenes": ["drummer", "ocean waves", "rainy street", "retriever", "fireworks"], "ar": "768/512", "cols": 3, "arms": [{"label": "bf16 (A100 ref)", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s4.webp"]}, {"label": "int4 r32, rotation off (control) \u00b7 13.7 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e05-off/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e05-off/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e05-off/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e05-off/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e05-off/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e05-off/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e05-off/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e05-off/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e05-off/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e05-off/s4.webp"]}, {"label": "int4 r32 + H64 \u00b7 15.4 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s4.webp"]}, {"label": "bf16 (A100 ref)", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/fix2-bf16-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/fix2-bf16-a100/s4.webp"]}, {"label": "int4 r32 + H64 \u00b7 15.4 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r32-e0/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r32-e0/s4.webp"]}, {"label": "int4 r128 + H64 \u00b7 14.3 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r128-e0/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r128-e0/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r128-e0/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r128-e0/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/hw-int4-r128-e0/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r128-e0/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r128-e0/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r128-e0/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r128-e0/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/hw-int4-r128-e0/s4.webp"]}]}, "h_minimax": {"title": "MiniMax-H3, int4 rotation off vs on, with plain nvfp4 for scale", "scenes": ["drummer", "ocean waves", "rainy street", "retriever", "fireworks"], "ar": "960/544", "cols": 3, "arms": [{"label": "bf16 (A100 ref)", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-a100/s4.webp"]}, {"label": "int4 r32 \u00b7 14.5 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-a100/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-a100/s4.webp"]}, {"label": "int4 r32 + H64 \u00b7 15.6 dB", "row": 0, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-hw/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-hw/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-hw/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-hw/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-int4-hw/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-hw/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-hw/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-hw/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-hw/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-int4-hw/s4.webp"]}, {"label": "bf16 (RTX ref)", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-bf16-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-bf16-rtx/s4.webp"]}, {"label": "nvfp4 r32, no rotation \u00b7 15.9 dB", "row": 1, "clips": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s0.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s1.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s2.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s3.mp4", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/videos/players/mm-nvfp4-rtx/s4.mp4"], "posters": ["https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s0.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s1.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s2.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s3.webp", "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-10-12-data-free-svdquant/images/posters/mm-nvfp4-rtx/s4.webp"]}]}}</script>
+<script>
+(function(){
+  var man=JSON.parse(document.getElementById('vman').textContent);
+  var all=[];   // every player video on the page: starting one pauses the rest, so only one decodes at a time
+  document.addEventListener('play',function(e){
+    if(e.target.tagName!=='VIDEO')return;
+    all.forEach(function(v){if(v!==e.target&&!v.paused)v.pause();});
+  },true);
+  var io=('IntersectionObserver' in window)?new IntersectionObserver(function(es){
+    es.forEach(function(en){if(!en.isIntersecting&&!en.target.paused)en.target.pause();});
+  },{threshold:0}):null;
+  document.querySelectorAll('.vc').forEach(function(root){
+    var g=man[root.dataset.group]; if(!g) return;
+    var rate=1;
+    root.innerHTML='<div class="bar"><span class="t"></span><span class="seg" data-role="scenes"></span>'+
+      '<label class="spd">speed <select data-role="rate"><option value="1">1×</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label></div><div class="vgrid"></div>'+
+      '<p class="note">Press play on any video to watch it; starting one pauses the others. The dB in each label is PSNR ↑ against the reference at the start of its row. Stills show the middle frame; each clip (about 1 MB) loads when you play it.</p>';
+    root.querySelector('.t').textContent=g.title;
+    var seg=root.querySelector('[data-role=scenes]'), grid=root.querySelector('.vgrid');
+    g.scenes.forEach(function(name,k){var b=document.createElement('button');b.textContent='s'+k+' '+name;b.setAttribute('aria-pressed',k===0);b.addEventListener('click',function(){select(k);});seg.appendChild(b);});
+    var rows=[];grid.style.setProperty('--cols',g.cols);
+    var vids=g.arms.map(function(a){
+      if(!rows[a.row]){rows[a.row]=document.createElement('div');rows[a.row].className='vrow';grid.appendChild(rows[a.row]);}
+      var t=document.createElement('div');t.className='tile';
+      var v=document.createElement('video');v.playsInline=true;v.loop=true;v.preload='none';v.controls=true;
+      v.style.aspectRatio=g.ar;
+      v.addEventListener('play',function(){v.playbackRate=rate;});
+      var l=document.createElement('p');l.className='lab';l.textContent=a.label;
+      t.appendChild(v);t.appendChild(l);rows[a.row].appendChild(t);
+      all.push(v); if(io)io.observe(v);
+      return v;});
+    function select(k){seg.querySelectorAll('button').forEach(function(b,j){b.setAttribute('aria-pressed',j===k);});
+      vids.forEach(function(v,j){v.pause();v.removeAttribute('src');v.load();v.poster=g.arms[j].posters[k];v.src=g.arms[j].clips[k];});}
+    root.querySelector('[data-role=rate]').addEventListener('change',function(e){rate=parseFloat(e.target.value);vids.forEach(function(v){v.playbackRate=rate;});});
+    select(0);
+  });
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+try{if(window.hljs){hljs.configure({ignoreUnescapedHTML:true});document.querySelectorAll('.code pre code').forEach(function(el){hljs.highlightElement(el);});}}catch(_){}
+</script>
+<script>
+document.querySelectorAll('.code .copy').forEach(function(b){b.addEventListener('click',function(){
+  var c=b.parentNode.querySelector('code'), t=c.textContent;
+  function done(ok){b.textContent=ok?'Copied':'Select and copy';setTimeout(function(){b.textContent='Copy';},1600);}
+  function fallback(){var r=document.createRange();r.selectNodeContents(c);var sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);done(false);}
+  try{navigator.clipboard.writeText(t).then(function(){done(true);},fallback);}catch(_){fallback();}
+});});
+</script>
+<script>
+document.querySelectorAll('.toc a, a.cite').forEach(function(a){a.addEventListener('click',function(e){
+  var t=document.getElementById(a.getAttribute('href').slice(1)); if(!t)return; e.preventDefault();
+  var d=t.closest('details'); if(d)d.open=true;
+  t.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+  try{history.replaceState(null,'','#'+t.id);}catch(_){}
+});});
+</script>
+<script>
+(function(){
+  var v=document.getElementById('viewer'), vi=document.getElementById('viewer-img');
+  function open(src,alt){vi.src=src;vi.alt=alt||'';v.hidden=false;document.body.style.overflow='hidden';}
+  function close(){v.classList.remove('native');v.hidden=true;vi.removeAttribute('src');document.body.style.overflow='';}
+  document.querySelectorAll('.zoom').forEach(function(b){b.addEventListener('click',function(){open(b.dataset.src,b.querySelector('img').alt);});});
+  document.querySelectorAll('.sheet img').forEach(function(im){im.addEventListener('click',function(){open(im.getAttribute('src'),im.alt);});});
+  vi.addEventListener('click',function(e){e.stopPropagation();v.classList.toggle('native');});
+  v.addEventListener('click',close);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!v.hidden)close();});
+})();
+</script>
+
+<script>
+(function(){ // keep text, captions and the theme footer in the same column as the post title
+  function fit(){ var t=document.querySelector('header h1'); if(!t) return;
+    document.documentElement.style.setProperty('--title-col', Math.round(t.parentElement.getBoundingClientRect().width)+'px'); }
+  fit(); window.addEventListener('resize', fit);
+})();
+</script>
+</div>
+{% endraw %}
