@@ -149,7 +149,7 @@ excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal k
 <tr><td>Pipelines</td><td>Diffusers</td><td>mflux</td></tr>
 <tr><td>Model adapters</td><td>the CUDA adapters, unchanged</td><td>written for mflux's modules (FLUX.1, FLUX.2 Klein, generic manifest)</td></tr>
 <tr><td>Quantized layers</td><td>Metal kernels in <code>nunchaku-lite-kernels</code></td><td>Metal kernels through <code>mx.fast.metal_kernel</code></td></tr>
-<tr><td>Install</td><td><code>pip install "nunchaku-lite[torch]"</code> plus the local Metal kernels</td><td><code>pip install "nunchaku-lite[mlx]" mflux</code></td></tr>
+<tr><td>Install</td><td><code>pip install "nunchaku-lite[torch]"</code> (Metal kernels download from the Hugging Face Hub)</td><td><code>pip install "nunchaku-lite[mlx]" mflux</code></td></tr>
 <tr><td>Best for</td><td>Diffusers features: LoRA, CPU offload, every Diffusers pipeline</td><td>speed on the Klein models, and comparison with mflux q4</td></tr>
 </tbody></table></div>
 <p>Both read the same checkpoints, including the <code>lite-infer</code> repos with a runtime manifest and older lite checkpoints that list their quantized layers in <code>config.json</code>.</p>
@@ -258,8 +258,7 @@ image = model.generate_image(seed=42, prompt="Change the text on the cardboard s
                              image_paths=["musician.png"], num_inference_steps=4, height=1024, width=1024, guidance=1.0)
 image.image.save("musician_edit.png")</code></pre></div>
 <h3>PyTorch MPS</h3>
-<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># pip install "nunchaku-lite[torch]"
-# pip install --no-build-isolation ./nunchaku-lite-kernels   # Metal kernels, until the Hub build is published
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># pip install "nunchaku-lite[torch]"   # the Metal kernels download from the Hugging Face Hub on first use
 import torch
 from diffusers import Flux2KleinPipeline
 from nunchaku_lite import load_nunchaku_pipeline
@@ -281,7 +280,7 @@ image.save("klein4b.png")</code></pre></div>
 <ul>
 <li>The int8 and int4 backends need an M5-class GPU (Neural Accelerators) and macOS 26. Earlier Apple GPUs use the dequantized fallback.</li>
 <li>INT4 checkpoints only; NVFP4 is not supported on Apple silicon yet.</li>
-<li>PyTorch MPS needs the Metal kernels built locally until the Hub build (version 3) is published.</li>
+<li>The prebuilt Metal kernels on the Hugging Face Hub cover PyTorch 2.10 to 2.15; other PyTorch versions need a local build of <code>nunchaku-lite-kernels</code>.</li>
 <li>MLX adapters exist for FLUX.1 and FLUX.2 Klein; other families can use the generic manifest adapter.</li>
 <li>Attention is the largest remaining cost on both runtimes.</li>
 </ul>
