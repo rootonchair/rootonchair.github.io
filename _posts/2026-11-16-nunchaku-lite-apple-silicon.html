@@ -155,13 +155,31 @@ excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal k
 <p>Both read the same checkpoints, including the <code>lite-infer</code> repos with a runtime manifest and older lite checkpoints that list their quantized layers in <code>config.json</code>.</p>
 
 <h2 id="how-the-4-bit-layers-run">How the 4-bit layers run on M5</h2>
+<h3 id="neural-accelerators">The M5 Neural Accelerators</h3>
+<p>The M5 GPU has a Neural Accelerator in each GPU core: matrix-multiply hardware that Metal 4 shaders reach through tensor operations (<code>matmul2d</code> in Metal Performance Primitives). Earlier Apple GPUs run matrix multiplies on the regular shader ALUs. What the accelerators reward is integer math. In compute-only tests on this M5, on AC power:</p>
+<div class="tbl"><table><thead><tr><th>operands (accumulator)</th><th class="n">throughput ↑</th></tr></thead><tbody>
+<tr><td>int8 × int8 (int32)</td><td class="n">~30 TOPS</td></tr>
+<tr><td>int8 × int4 (int32)</td><td class="n">~30 TOPS</td></tr>
+<tr><td>fp16 or bf16 × anything</td><td class="n">~15 TFLOPS</td></tr>
+</tbody></table></div>
+<p>Two consequences shape the design. Int8 is twice as fast as bf16, so a layer gains by running its matmul in int8. And a 4-bit operand runs no faster than an 8-bit one (int8 × int4 matches int8 × int8), so 4-bit activations would add error without adding speed. So the layers run as <b>W4A8</b> (4-bit weights, int8 activations) or <b>W8A8</b> (the same 4-bit values stored expanded to int8), not as Nunchaku's CUDA W4A4.</p>
+<p>The fused kernels get close to that ceiling. Timed alone at FLUX projection shapes for a 1024² image (4,608 tokens), with the scales, bias and low-rank branch included in the int8 kernels:</p>
+<div class="tbl"><table><thead><tr><th>projection (K → N)</th><th class="n">bf16 matmul</th><th class="n">W8A8 kernel</th><th class="n">W4A8 kernel</th></tr></thead><tbody>
+<tr><td>QKV 3072 → 9216</td><td class="n">17.3 ms · 15.1 T</td><td class="n good">9.4 ms · 27.8 T</td><td class="n good">12.1 ms · 21.7 T</td></tr>
+<tr><td>MLP in 3072 → 12288</td><td class="n">23.0 ms · 15.1 T</td><td class="n good">12.5 ms · 27.8 T</td><td class="n good">16.0 ms · 21.8 T</td></tr>
+<tr><td>MLP out 12288 → 3072</td><td class="n">38.2 ms · 9.1 T</td><td class="n good">17.6 ms · 19.8 T</td><td class="n good">17.6 ms · 19.8 T</td></tr>
+<tr><td>attention out 3072 → 3072</td><td class="n">5.9 ms · 14.8 T</td><td class="n good">3.3 ms · 26.6 T</td><td class="n good">4.2 ms · 21.0 T</td></tr>
+</tbody></table></div>
+<p>T is tera-operations per second, counting a multiply-add as two. The W4A8 kernel is slower than W8A8 because it expands each 4-bit weight to its int8 value in the shader before the accelerator sees it. As whole layers, with activation quantization included, the four projections of a FLUX block take 52.8 ms with int8 and 60.5 ms with int4, against 86.9 ms in bf16: 1.65× and 1.44× faster. MLX's own 4-bit format, which mflux q4 uses, takes 81.2 ms: it stores 4-bit weights but does its arithmetic in bf16, so it saves memory but not time.</p>
+
+<h3 id="w4a8-layers">SVDQuant layers on the accelerators</h3>
 <p>An SVDQuant layer splits each weight into a small low-rank branch kept in 16-bit and a 4-bit residual with one scale per 64 input channels. On CUDA, the residual runs as a 4-bit × 4-bit matmul. Apple GPUs have no 4-bit matmul, but the M5's Neural Accelerators run int8 matmuls, reachable from Metal 4 shaders.</p>
 <ul>
 <li><b>Activations</b> are smoothed and quantized to int8 per token, a finer grid than the 4-bit activations the CUDA kernel uses.</li>
 <li><b>Weights</b> keep their 4-bit values. Each per-group scale is split into a per-channel scale and an integer-domain multiplier, so the int32 accumulator can run over the whole input dimension in one pass.</li>
 <li><b>The epilogue</b> applies the activation and channel scales, the bias, and the low-rank branch once, in the same kernel.</li>
 </ul>
-<p>Two weight backends share that kernel. <code>int8</code> stores the weights pre-expanded to int8, twice the memory of int4, and is the fastest. <code>int4</code> keeps them 4-bit and expands them inside the kernel, about 16% slower in isolation. <code>backend="auto"</code> picks <code>int8</code> when the model fits in half of the GPU's memory budget, otherwise <code>int4</code>. On a 24 GB Mac that means int8 for Klein 4B and int4 for Klein 9B and FLUX.1-dev. Macs without Neural Accelerators fall back to a dequantized path.</p>
+<p>Two weight backends share that kernel. <code>int8</code> stores the weights pre-expanded to int8, twice the memory of int4, and is the fastest. <code>int4</code> keeps them 4-bit and expands them inside the kernel, about 15% slower per layer. <code>backend="auto"</code> picks <code>int8</code> when the model fits in half of the GPU's memory budget, otherwise <code>int4</code>. On a 24 GB Mac that means int8 for Klein 4B and int4 for Klein 9B and FLUX.1-dev. Macs without Neural Accelerators fall back to a dequantized path.</p>
 <p>The AdaNorm modulation layers are AWQ W4A16. On MLX they map losslessly onto MLX's own 4-bit format and its built-in kernel; on PyTorch MPS they use PyTorch's int4 matmul for MPS.</p>
 
 <h2 id="latency-and-memory">Latency and memory</h2>
@@ -267,7 +285,7 @@ repo = "lite-infer/flux.2-klein-4b-nunchaku-lite-int4-r32"
 pipe = load_nunchaku_pipeline(
     repo,
     pipeline_cls=Flux2KleinPipeline,
-    checkpoint=f"{repo}/transformer/diffusion_pytorch_model.safetensors",
+    checkpoint="lite-infer/flux.2-klein-4b-nunchaku-lite-int4-r32/transformer/diffusion_pytorch_model.safetensors",
     torch_dtype=torch.bfloat16,
     device="mps",
     backend="auto",
