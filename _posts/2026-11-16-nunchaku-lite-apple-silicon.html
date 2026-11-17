@@ -128,6 +128,8 @@ excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal k
 .asi .code{max-width:var(--title-col,730px);margin-inline:auto}
 /* theme footer of this post (tags, share icons, prev/next): same centered column as the title */
 .blog-tags,#social-share-section,.pagination.blog-pager{max-width:var(--title-col,730px);margin-left:auto;margin-right:auto}
+.asi .tbl{width:fit-content;max-width:100%;margin-inline:auto}
+.asi table{width:auto}
 </style>
 <div class="wrap">
 <p class="lede">The same 4-bit SVDQuant checkpoints that run on CUDA now run on an M5 Mac, through PyTorch MPS (Diffusers) and MLX (mflux). New Metal kernels run the 4-bit layers as int8 matrix multiplies on the GPU's Neural Accelerators. Measured on an M5 with 24 GB, at 1024².</p>
