@@ -1,0 +1,331 @@
+---
+layout: post
+title: 4-bit diffusion transformers on Apple silicon
+subtitle: Nunchaku Lite runs SVDQuant checkpoints on M5 Macs through PyTorch MPS and MLX, with Metal kernels for the GPU's Neural Accelerators
+tags: [en, quantization, diffusion, apple-silicon]
+comments: true
+full-width: true
+author: Pham Hong Vinh
+excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal kernels run the 4-bit layers as int8 matmuls on the M5 Neural Accelerators, 1.38x faster than mflux q4 on FLUX.1-dev at similar memory."
+---
+{% raw %}
+<div class="asi">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>.asi{--syn-kw:#8a3b12;--syn-str:#2f6b3a;--syn-com:#8a8578;--syn-num:#1f5f8b;--syn-fn:#6b3fa0;--syn-var:#1f5f8b;--bg:#f7f6f2;--fg:#1d1d1b;--muted:#5d5b55;--line:#d9d6cc;--panel:#ffffff;--accent:#8a3b12;--good:#2c6b3f;--bad:#a0342c;
+ --display:"Source Serif 4",Georgia,serif;--body:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+.asi{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.55;padding-inline:16px;padding-block:32px 64px}
+.asi .wrap{max-width:1100px;margin:0 auto}
+.asi h1{font-family:var(--display);font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.1;text-wrap:balance;margin:0 0 8px}
+.asi h2{font-family:var(--display);font-weight:700;font-size:24px;margin:48px 0 12px;text-wrap:balance}
+.asi h3{font-size:16px;font-weight:600;margin:24px 0 6px}
+.asi p{max-width:72ch;margin:0 0 12px}
+.asi .lede{font-size:18px;color:var(--muted);max-width:72ch}
+.asi .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.asi ul{max-width:72ch;padding-left:20px}
+.asi li{margin-bottom:6px}
+.asi .tbl{overflow-x:auto;border:1px solid var(--line);background:var(--panel);margin:12px 0 20px}
+.asi table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+.asi th,.asi td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+.asi th{font-weight:600;font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+.asi td.n{font-family:var(--mono);text-align:right}
+.asi th.n{text-align:right}
+.asi td.good{color:var(--good);font-weight:600}
+.asi td.bad{color:var(--bad);font-weight:600}
+.asi .sheet{margin-block:16px 28px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2));margin-right:0}
+.asi .sheet img{width:100%;max-width:100%;display:block;border:1px solid var(--line);background:#fff}
+.asi .sheet figcaption{font-size:14px;color:var(--muted);max-width:80ch;margin-top:8px}
+.asi .verdict{border-left:3px solid var(--accent);padding:4px 16px;margin:16px 0 24px;max-width:72ch}
+.asi .verdict p{margin:4px 0}
+.asi code{font-family:var(--mono);font-size:13px}
+.asi .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:12px 0 20px}
+.asi .card{border:1px solid var(--line);background:var(--panel);padding:14px 16px;min-width:0}
+.asi .card .k{font-family:var(--mono);font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.asi .card .v{font-family:var(--display);font-size:26px;font-weight:700;margin:4px 0}
+.asi .card .d{font-size:14px;color:var(--muted)}
+.asi .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:18px;margin-block:12px 24px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2))}
+.asi .g{margin:0;min-width:0}
+.asi .g img{width:100%;max-width:100%;display:block;border:1px solid var(--line);background:#fff}
+.asi .g figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.asi details{margin:8px 0 16px}
+.asi summary{cursor:pointer;font-weight:600}
+.asi .vc{border:1px solid var(--line);background:var(--panel);padding:12px 14px;margin-block:12px 28px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2))}
+.asi .vc .bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:10px;font-size:14px}
+.asi .vc .bar .t{font-weight:600;margin-right:auto}
+.asi .vc .seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.asi .vc button,.asi .vc select{font:inherit;font-size:13px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
+.asi .vc button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.asi .vc .vgrid{display:grid;gap:14px}
+.asi .vc .vrow{display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));gap:12px}
+@media (max-width:820px){.asi .vc .vrow{grid-template-columns:1fr}}
+.asi .vc .tile{min-width:0}
+.asi .vc .tile video{width:100%;max-width:100%;display:block;background:#000;object-fit:contain}
+.asi .vc .tile .lab{font-family:var(--mono);font-size:12px;color:var(--muted);margin:4px 0 0}
+.asi .vc .note{font-size:13px;color:var(--muted);margin:8px 0 0}
+.asi .steps{max-width:72ch;padding-left:22px}
+.asi .steps li{margin-bottom:10px}
+.asi .steps li p{margin:0 0 4px}
+.asi mjx-container[display="true"]{overflow-x:auto;overflow-y:hidden;margin:6px 0 4px!important}
+.asi .diag{margin:18px 0 26px}
+.asi .diag .dscroll{overflow-x:auto;max-width:100%}
+.asi .diag .dpair{display:flex;flex-wrap:wrap;gap:12px 24px}
+.asi .diag .dpair svg.half{flex:1 1 340px;min-width:0;width:auto;max-width:100%;height:auto;color:var(--fg);font-family:var(--body)}
+.asi .diag svg{display:block;width:100%;min-width:680px;height:auto;color:var(--fg);font-family:var(--body)}
+.asi .diag figcaption{font-size:14px;color:var(--muted);max-width:80ch;margin-top:8px}
+.asi .paths code{word-break:break-all}
+.asi .vc .spd{font-size:13px;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+.asi .code{position:relative;margin:10px 0 16px;max-width:72ch}
+.asi .code pre{margin:0;overflow-x:auto;background:var(--panel);border:1px solid var(--line);padding:14px 16px;font-family:var(--mono);font-size:13px;line-height:1.55;color:var(--fg)}
+.asi .code .copy{position:absolute;top:8px;right:8px;font:12px var(--mono);color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:3px 8px;cursor:pointer}
+.asi .hljs-keyword,.asi .hljs-built_in,.asi .hljs-literal,.asi .hljs-meta{color:var(--syn-kw)}
+.asi .hljs-string,.asi .hljs-subst{color:var(--syn-str)}
+.asi .hljs-comment{color:var(--syn-com);font-style:italic}
+.asi .hljs-number{color:var(--syn-num)}
+.asi .hljs-title,.asi .hljs-title.function_,.asi .hljs-params{color:var(--syn-fn)}
+.asi .hljs-variable,.asi .hljs-attr,.asi .hljs-template-variable{color:var(--syn-var)}
+.asi .code .copy:hover,.asi .code .copy:focus-visible{color:var(--accent);border-color:var(--accent)}
+.asi .toc{border:1px solid var(--line);background:var(--panel);padding:14px 18px;margin:16px 0 20px;max-width:72ch}
+.asi .toc .eyebrow{margin-bottom:6px}
+.asi .toc ol{margin:0;padding-left:22px;columns:2 220px;column-gap:28px}
+.asi .toc li{margin:0 0 6px;break-inside:avoid}
+.asi .toc li>a{font-weight:600}
+.asi .toc ul{margin:4px 0 0;padding-left:16px;list-style:none;font-size:13px}
+.asi .toc ul li{margin:0 0 3px}
+.asi .toc a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+.asi .toc a:hover,.asi .toc a:focus-visible{color:var(--accent);border-color:var(--accent)}
+.asi h2,.asi h3{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 12px)}
+.asi .dir{font-family:var(--mono);color:var(--accent);font-weight:600;margin-left:2px}
+.asi .legend{font-size:13px;color:var(--muted);margin:12px 0 -4px}
+.asi .legend-inline{font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+.asi .keyline{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--panel);display:inline-block;padding:6px 10px;margin:4px 0 8px}
+.asi .verdict{border-left:3px solid var(--accent);padding:4px 16px;margin:16px 0 24px;max-width:72ch}
+.asi .verdict p{margin:4px 0}
+.asi .cite{color:var(--accent);text-decoration:none;font-size:11px}
+.asi .cite:hover{text-decoration:underline}
+.asi .refs{max-width:80ch;font-size:14px;padding-left:22px}
+.asi .refs li{margin-bottom:6px}
+.asi .refs li:target{background:var(--panel)}
+.asi .vcap{font-size:14px;color:var(--muted);max-width:80ch;margin:-16px 0 28px}
+.asi .zoom{all:unset;display:block;cursor:zoom-in;width:100%}
+.asi .zoom:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.asi .sheet img{cursor:zoom-in}
+.asi #viewer{position:fixed;inset:0;background:rgba(0,0,0,.92);overflow:auto;z-index:10;padding:16px;cursor:zoom-out}
+.asi #viewer img{display:block;width:100%;max-width:none;margin:0 auto;background:#fff;cursor:zoom-in}
+.asi #viewer.native img{width:auto;cursor:zoom-out}
+.asi #viewer .hint{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:16px;color:#fff;font-family:var(--mono);font-size:12px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px}
+.asi{padding-inline:0;padding-block:8px 32px;font-size:16px;background:transparent;--bg:#ffffff;--panel:#fafaf8}
+.asi h2,.asi h3{scroll-margin-top:80px;margin-top:2em}
+.asi a{color:var(--accent)}
+.asi table{margin:0}
+.asi .toc a{color:var(--fg)}
+.asi #viewer{z-index:2000}
+.asi code{color:inherit;background:transparent;padding:0;border-radius:0;font-size:13px}
+.asi td{white-space:normal}
+.asi th{white-space:nowrap}
+.asi td:first-child{min-width:13em}
+.asi td.n{min-width:7.5em}
+.asi .wrap>p,.asi .wrap>ul,.asi .wrap>ol,.asi .wrap>ol.steps,.asi .wrap>h2,.asi .wrap>h3,.asi .wrap>.lede,.asi .wrap>.verdict,.asi .wrap>.toc,.asi .wrap>details>summary,.asi .vcap,.asi .sheet figcaption,.asi .diag figcaption{max-width:var(--title-col,730px);margin-inline:auto}
+.asi .wrap>.keyline{display:block;max-width:var(--title-col,730px);margin-inline:auto}
+.asi .code{max-width:var(--title-col,730px);margin-inline:auto}
+/* theme footer of this post (tags, share icons, prev/next): same centered column as the title */
+.blog-tags,#social-share-section,.pagination.blog-pager{max-width:var(--title-col,730px);margin-left:auto;margin-right:auto}
+</style>
+<div class="wrap">
+<p class="lede">The same 4-bit SVDQuant checkpoints that run on CUDA now run on an M5 Mac, through PyTorch MPS (Diffusers) and MLX (mflux). New Metal kernels run the 4-bit layers as int8 matrix multiplies on the GPU's Neural Accelerators. Measured on an M5 with 24 GB, at 1024².</p>
+
+<p class="keyline"><span class="dir">↑</span> higher is better &nbsp;·&nbsp; <span class="dir">↓</span> lower is better. Speed-ups are per denoising step against mflux q4, the existing 4-bit option on MLX.</p>
+
+<nav class="toc" aria-label="Outline"><div class="eyebrow">Outline</div><ol><li><a href="#two-runtimes">Two runtimes</a></li><li><a href="#how-the-4-bit-layers-run">How the 4-bit layers run on M5</a></li><li><a href="#latency-and-memory">Latency and memory</a></li><li><a href="#visual-comparison">Visual comparison</a></li><li><a href="#image-editing">Image editing</a></li><li><a href="#try-it">Try it</a></li><li><a href="#limitations">Limitations and next steps</a></li></ol></nav>
+
+<div class="grid">
+ <div class="card"><div class="k">FLUX.1-dev, MLX</div><div class="v">1.38× faster</div><div class="d">8.78 s vs 12.15 s per step against mflux q4, 1024², 20 steps</div></div>
+ <div class="card"><div class="k">FLUX.2 Klein 9B, MLX</div><div class="v">1.35× faster</div><div class="d">5.41 s vs 7.33 s per step, int4, peak 10.6 vs 10.3 GB</div></div>
+ <div class="card"><div class="k">Quality vs bf16, Klein 4B</div><div class="v">on par</div><div class="d">PSNR <span class="dir">↑</span> 17.8 dB (Nunchaku) vs 17.5 dB (mflux q4) against the bf16 transformer, mean of 3 prompts; the gap is within the per-prompt spread</div></div>
+ <div class="card"><div class="k">Image editing, Klein 4B, MLX</div><div class="v">1.24× faster</div><div class="d">5.78 s vs 7.15 s per step against mflux q4; the same checkpoint loads into mflux&#39;s edit pipeline</div></div>
+</div>
+
+<h2 id="two-runtimes">Two runtimes</h2>
+<p>Nunchaku Lite loads Nunchaku SVDQuant checkpoints into existing pipelines instead of shipping its own. On a Mac there are two pipeline ecosystems, so there are two runtimes.</p>
+<div class="tbl"><table><thead><tr><th></th><th>PyTorch MPS</th><th>MLX</th></tr></thead><tbody>
+<tr><td>Pipelines</td><td>Diffusers</td><td>mflux</td></tr>
+<tr><td>Model adapters</td><td>the CUDA adapters, unchanged</td><td>written for mflux's modules (FLUX.1, FLUX.2 Klein, generic manifest)</td></tr>
+<tr><td>Quantized layers</td><td>Metal kernels in <code>nunchaku-lite-kernels</code></td><td>Metal kernels through <code>mx.fast.metal_kernel</code></td></tr>
+<tr><td>Install</td><td><code>pip install "nunchaku-lite[torch]"</code> plus the local Metal kernels</td><td><code>pip install "nunchaku-lite[mlx]" mflux</code></td></tr>
+<tr><td>Best for</td><td>Diffusers features: LoRA, CPU offload, every Diffusers pipeline</td><td>speed on the Klein models, and comparison with mflux q4</td></tr>
+</tbody></table></div>
+<p>Both read the same checkpoints, including the <code>lite-infer</code> repos with a runtime manifest and older lite checkpoints that list their quantized layers in <code>config.json</code>.</p>
+
+<h2 id="how-the-4-bit-layers-run">How the 4-bit layers run on M5</h2>
+<p>An SVDQuant layer splits each weight into a small low-rank branch kept in 16-bit and a 4-bit residual with one scale per 64 input channels. On CUDA, the residual runs as a 4-bit × 4-bit matmul. Apple GPUs have no 4-bit matmul, but the M5's Neural Accelerators run int8 matmuls, reachable from Metal 4 shaders.</p>
+<ul>
+<li><b>Activations</b> are smoothed and quantized to int8 per token, a finer grid than the 4-bit activations the CUDA kernel uses.</li>
+<li><b>Weights</b> keep their 4-bit values. Each per-group scale is split into a per-channel scale and an integer-domain multiplier, so the int32 accumulator can run over the whole input dimension in one pass.</li>
+<li><b>The epilogue</b> applies the activation and channel scales, the bias, and the low-rank branch once, in the same kernel.</li>
+</ul>
+<p>Two weight backends share that kernel. <code>int8</code> stores the weights pre-expanded to int8, twice the memory of int4, and is the fastest. <code>int4</code> keeps them 4-bit and expands them inside the kernel, about 16% slower in isolation. <code>backend="auto"</code> picks <code>int8</code> when the model fits in half of the GPU's memory budget, otherwise <code>int4</code>. On a 24 GB Mac that means int8 for Klein 4B and int4 for Klein 9B and FLUX.1-dev. Macs without Neural Accelerators fall back to a dequantized path.</p>
+<p>The AdaNorm modulation layers are AWQ W4A16. On MLX they map losslessly onto MLX's own 4-bit format and its built-in kernel; on PyTorch MPS they use PyTorch's int4 matmul for MPS.</p>
+
+<h2 id="latency-and-memory">Latency and memory</h2>
+<p>M5, 24 GB, on AC power. 1024², seed 42, one warm-up image, then the median step time over 3 prompts (2 for Klein 9B and FLUX.1-dev). Klein runs 4 steps, FLUX.1-dev 20 steps at guidance 3.5. Every MLX configuration uses the same text encoder and VAE (mflux's q4) and the same 1 GB cap on MLX's buffer cache.</p>
+<h3>MLX</h3>
+<div class="tbl"><table><thead><tr><th>model</th><th>transformer</th><th class="n">step ↓</th><th class="n">vs mflux q4 ↑</th><th class="n">peak memory ↓</th></tr></thead><tbody>
+<tr><td>FLUX.2 Klein 4B</td><td>bf16</td><td class="n">3.48 s</td><td class="n">0.96×</td><td class="n">11.1 GB</td></tr>
+<tr><td>FLUX.2 Klein 4B</td><td>mflux q4</td><td class="n">3.33 s</td><td class="n">—</td><td class="n">5.5 GB</td></tr>
+<tr><td>FLUX.2 Klein 4B</td><td>Nunchaku int8</td><td class="n">2.44 s</td><td class="n good">1.36×</td><td class="n">7.5 GB</td></tr>
+<tr><td>FLUX.2 Klein 4B</td><td>Nunchaku int4</td><td class="n">2.61 s</td><td class="n good">1.27×</td><td class="n">5.5 GB</td></tr>
+<tr><td>FLUX.2 Klein 9B</td><td>mflux q4</td><td class="n">7.33 s</td><td class="n">—</td><td class="n">10.3 GB</td></tr>
+<tr><td>FLUX.2 Klein 9B</td><td>Nunchaku int8</td><td class="n">5.69 s</td><td class="n good">1.29×</td><td class="n">15.8 GB</td></tr>
+<tr><td>FLUX.2 Klein 9B</td><td>Nunchaku int4</td><td class="n">5.41 s</td><td class="n good">1.35×</td><td class="n">10.6 GB</td></tr>
+<tr><td>FLUX.1-dev</td><td>mflux q4</td><td class="n">12.15 s</td><td class="n">—</td><td class="n">21.9 GB</td></tr>
+<tr><td>FLUX.1-dev</td><td>Nunchaku int4</td><td class="n">8.78 s</td><td class="n good">1.38×</td><td class="n">22.7 GB</td></tr>
+</tbody></table></div>
+<p>Not every model has every row because some configurations don't fit in 24 GB. A bf16 transformer is 18 GB for Klein 9B and 24 GB for FLUX.1-dev, too large to run next to the text encoder. FLUX.1-dev int8 would need about 7 GB more than int4 for the expanded weights, roughly 29 GB at peak, so it isn't shown; <code>auto</code> picks int4 for it.</p>
+<p>Peak memory is the whole pipeline, text encoder and VAE included. On FLUX.1-dev both peaks come from the VAE decode at 1024², which adds about 12 GB in both pipelines; during denoising, Nunchaku's transformer step adds less than mflux's. Klein 9B int8 is slower than int4 on 24 GB because its int8 weights push the pipeline into swap, which is why <code>auto</code> picks int4 there.</p>
+<h3>PyTorch MPS</h3>
+<div class="tbl"><table><thead><tr><th>model</th><th>transformer</th><th class="n">step ↓</th><th class="n">vs bf16 ↑</th><th class="n">allocated ↓</th><th class="n">MPS driver ↓</th></tr></thead><tbody>
+<tr><td>FLUX.2 Klein 4B</td><td>bf16</td><td class="n">4.96 s</td><td class="n">—</td><td class="n">10.8 GB</td><td class="n">17.1 GB</td></tr>
+<tr><td>FLUX.2 Klein 4B</td><td>Nunchaku int8</td><td class="n">4.15 s</td><td class="n">1.20×</td><td class="n">7.5 GB</td><td class="n">15.0 GB</td></tr>
+<tr><td>FLUX.2 Klein 4B</td><td>Nunchaku int4</td><td class="n">4.38 s</td><td class="n">1.13×</td><td class="n">5.5 GB</td><td class="n">12.4 GB</td></tr>
+</tbody></table></div>
+<p>"Allocated" is memory held by tensors during denoising, including the text encoder (4-bit NF4 in this repo) and VAE. "MPS driver" adds PyTorch's MPS allocator cache, which keeps freed buffers for reuse. On Klein 4B, measured side by side, MLX is about 1.7× faster than PyTorch MPS with the same backend.</p>
+
+<h2 id="visual-comparison">Visual comparison</h2>
+<p>Each cell is PSNR in dB <span class="dir">↑</span> and SSIM <span class="dir">↑</span> against the bf16 transformer of the same runtime: same prompt, seed 42, text encoder and VAE, so only the transformer differs. The last column lists PSNR per prompt.</p>
+<h3>MLX (mflux pipeline, q4 text encoder)</h3>
+<div class="tbl"><table><thead><tr><th>transformer</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th><th class="n">per prompt (dB)</th></tr></thead><tbody>
+<tr><td>mflux q4</td><td class="n">17.53</td><td class="n">0.769</td><td class="n">15.2 / 20.5 / 16.9</td></tr>
+<tr><td>Nunchaku int8 = int4 (MLX)</td><td class="n">17.80</td><td class="n">0.778</td><td class="n">14.6 / 18.6 / 20.2</td></tr>
+</tbody></table></div>
+<h3>PyTorch MPS (Diffusers pipeline)</h3>
+<div class="tbl"><table><thead><tr><th>transformer</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th><th class="n">per prompt (dB)</th></tr></thead><tbody>
+<tr><td>Nunchaku int8 = int4 (MPS)</td><td class="n">17.32</td><td class="n">0.749</td><td class="n">14.2 / 20.4 / 17.3</td></tr>
+</tbody></table></div>
+<p>Nunchaku and mflux q4 are on par: the gap in mean PSNR is smaller than the spread between prompts, and each wins on some prompts. Absolute PSNR is modest for every 4-bit option because a 4-step distilled model turns small numerical differences into visible changes in pose and layout, as in the CUDA results of the <a href="/2026-10-12-data-free-svdquant/">previous post</a>. The int8 and int4 backends produce bit-identical images: the int4 kernel expands the 4-bit weights to exactly the int8 values, so the two differ only in memory and speed. The grids below show one Nunchaku column for both.</p>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-17-nunchaku-lite-apple-silicon/images/page/klein4b_mlx.webp" alt="FLUX.2 Klein 4B on MLX: bf16, mflux q4, Nunchaku" loading="lazy" decoding="async"><figcaption>FLUX.2 Klein 4B on MLX: bf16 transformer, mflux q4, Nunchaku (int8 and int4 give the same image). Same prompt, seed, text encoder and VAE in every column. Both 4-bit options keep the sign text and both move the frisbee out of the dog&#39;s mouth; Nunchaku keeps the bf16 lace and table layout in the still life, mflux q4 spreads the lace across the table. Click to open at full size.</figcaption></figure>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-17-nunchaku-lite-apple-silicon/images/page/klein4b_sign_crop.webp" alt="Klein 4B sign crop on MLX" loading="lazy" decoding="async"><figcaption>Prompt 1 on MLX, 2× crop of the sign: bf16, mflux q4, Nunchaku. All three render the text correctly.</figcaption></figure>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-17-nunchaku-lite-apple-silicon/images/page/klein4b_mps.webp" alt="FLUX.2 Klein 4B on PyTorch MPS" loading="lazy" decoding="async"><figcaption>FLUX.2 Klein 4B on PyTorch MPS with the Diffusers pipeline: bf16 and Nunchaku (int8 and int4 give the same image).</figcaption></figure>
+<p>Compare images within one runtime. MLX and PyTorch MPS draw the initial noise differently and use different text encoders (mflux's q4 and the repo's NF4), so the same seed gives different compositions across runtimes.</p>
+<p>Klein 9B and FLUX.1-dev have no bf16 column: their bf16 transformers (18 and 24 GB) do not fit a 24 GB Mac next to the text encoder.</p>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-17-nunchaku-lite-apple-silicon/images/page/klein9b_mlx.webp" alt="FLUX.2 Klein 9B on MLX" loading="lazy" decoding="async"><figcaption>FLUX.2 Klein 9B on MLX: mflux q4 and Nunchaku (int8 and int4 give the same image).</figcaption></figure>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-17-nunchaku-lite-apple-silicon/images/page/flux1_mlx.webp" alt="FLUX.1-dev on MLX" loading="lazy" decoding="async"><figcaption>FLUX.1-dev on MLX, 20 steps: mflux q4 and Nunchaku int4.</figcaption></figure>
+
+<h2 id="image-editing">Image editing</h2>
+<p>FLUX.2 Klein also edits images: the input image is encoded by the VAE and its tokens are appended to the output image's tokens, so the transformer attends to both. The same Nunchaku checkpoint loads into mflux's edit pipeline (<code>Flux2KleinEdit</code>) with no changes. Each edit below starts from one of the bf16 text-to-image results above, with seed 42, 4 steps and a 1024² output:</p>
+<ol><li>Change the text on the cardboard sign to say JAZZ NIGHT.</li><li>Replace the oranges with green apples.</li><li>Make it a snowy winter day, with snow covering the meadow.</li></ol>
+<figure class="sheet"><img src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-17-nunchaku-lite-apple-silicon/images/page/klein4b_edit_mlx.webp" alt="Klein 4B image edits on MLX" loading="lazy" decoding="async"><figcaption>FLUX.2 Klein 4B image editing on MLX. Rows: the three instructions above. Columns: input image, bf16 transformer, mflux q4, Nunchaku (int8 and int4 give the same image). Click to open at full size.</figcaption></figure>
+<div class="tbl"><table><thead><tr><th>transformer</th><th class="n">step ↓</th><th class="n">vs mflux q4 ↑</th><th class="n">peak memory ↓</th></tr></thead><tbody>
+<tr><td>bf16</td><td class="n">7.83 s</td><td class="n">0.91×</td><td class="n">11.9 GB</td></tr>
+<tr><td>mflux q4</td><td class="n">7.15 s</td><td class="n">—</td><td class="n">7.6 GB</td></tr>
+<tr><td>Nunchaku int8</td><td class="n">5.78 s</td><td class="n good">1.24×</td><td class="n">11.9 GB</td></tr>
+<tr><td>Nunchaku int4</td><td class="n">6.01 s</td><td class="n good">1.19×</td><td class="n">9.9 GB</td></tr>
+</tbody></table></div>
+<p>Median step time over the three edits, after a warm-up edit. An edit step carries the input image's tokens as well as the output's, twice the image tokens of text-to-image, and attention cost grows faster than that: 6.01 s against 2.61 s per step for Nunchaku int4. Peak memory also grows with the token count. Nunchaku's working memory grows more than mflux q4's: its edit peak is 2.3 GB higher, where for text-to-image the two peaks were equal.</p>
+<div class="tbl"><table><thead><tr><th>transformer</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th><th class="n">per edit (dB)</th></tr></thead><tbody>
+<tr><td>mflux q4</td><td class="n">31.60</td><td class="n">0.977</td><td class="n">33.1 / 35.9 / 25.8</td></tr>
+<tr><td>Nunchaku int8 = int4 (MLX)</td><td class="n">28.46</td><td class="n">0.963</td><td class="n">30.3 / 35.6 / 19.5</td></tr>
+</tbody></table></div>
+<p>PSNR and SSIM against the bf16 edit. All three transformers apply every edit and keep the rest of the input image. Here mflux q4 stays closer to the bf16 result than Nunchaku, 31.6 dB against 28.5 dB, and most of the gap is the snow edit, which repaints the whole background. The int8 and int4 backends again produce bit-identical images, so the grid shows one Nunchaku column.</p>
+
+<h2 id="try-it">Try it</h2>
+<h3>MLX</h3>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># pip install "nunchaku-lite[mlx]" mflux
+import mlx.core as mx
+from mflux.models.common.config.model_config import ModelConfig
+from mflux.models.flux2.variants import Flux2Klein
+from nunchaku_lite.mlx import load_nunchaku_pipeline
+
+mx.set_cache_limit(1 &lt;&lt; 30)  # keep MLX's buffer cache from pushing a 24 GB Mac into swap
+model = load_nunchaku_pipeline(
+    "mflux-community/flux2-klein-9b-mflux-q4",  # text encoder, VAE, scheduler
+    pipeline_cls=Flux2Klein,
+    checkpoint="lite-infer/flux.2-klein-9b-nunchaku-lite-int4-r32",  # only transformer/ is downloaded
+    backend="auto",  # int8 or int4 from available memory
+    model_config=ModelConfig.flux2_klein_9b(),
+)
+image = model.generate_image(seed=42, prompt="A golden retriever mid-leap catching a frisbee",
+                             num_inference_steps=4, height=1024, width=1024, guidance=1.0)
+image.image.save("klein9b.png")</code></pre></div>
+<p>For editing, load the same checkpoint into mflux&#39;s edit pipeline and pass the input image:</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">from mflux.models.flux2.variants.edit.flux2_klein_edit import Flux2KleinEdit
+
+model = load_nunchaku_pipeline(
+    "mflux-community/flux2-klein-4b-mflux-q4",
+    pipeline_cls=Flux2KleinEdit,
+    checkpoint="lite-infer/flux.2-klein-4b-nunchaku-lite-int4-r32",
+    backend="auto",
+    model_config=ModelConfig.flux2_klein_4b(),
+)
+image = model.generate_image(seed=42, prompt="Change the text on the cardboard sign to say JAZZ NIGHT.",
+                             image_paths=["musician.png"], num_inference_steps=4, height=1024, width=1024, guidance=1.0)
+image.image.save("musician_edit.png")</code></pre></div>
+<h3>PyTorch MPS</h3>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python"># pip install "nunchaku-lite[torch]"
+# pip install --no-build-isolation ./nunchaku-lite-kernels   # Metal kernels, until the Hub build is published
+import torch
+from diffusers import Flux2KleinPipeline
+from nunchaku_lite import load_nunchaku_pipeline
+
+repo = "lite-infer/flux.2-klein-4b-nunchaku-lite-int4-r32"
+pipe = load_nunchaku_pipeline(
+    repo,
+    pipeline_cls=Flux2KleinPipeline,
+    checkpoint=f"{repo}/transformer/diffusion_pytorch_model.safetensors",
+    torch_dtype=torch.bfloat16,
+    device="mps",
+    backend="auto",
+)
+pipe.to("mps")
+image = pipe("A golden retriever mid-leap catching a frisbee", num_inference_steps=4, guidance_scale=1.0).images[0]
+image.save("klein4b.png")</code></pre></div>
+
+<h2 id="limitations">Limitations and next steps</h2>
+<ul>
+<li>The int8 and int4 backends need an M5-class GPU (Neural Accelerators) and macOS 26. Earlier Apple GPUs use the dequantized fallback.</li>
+<li>INT4 checkpoints only; NVFP4 is not supported on Apple silicon yet.</li>
+<li>PyTorch MPS needs the Metal kernels built locally until the Hub build (version 3) is published.</li>
+<li>MLX adapters exist for FLUX.1 and FLUX.2 Klein; other families can use the generic manifest adapter.</li>
+<li>Attention is the largest remaining cost on both runtimes.</li>
+</ul>
+</div>
+<div id="viewer" hidden role="dialog" aria-modal="true" aria-label="Full-size sheet"><span class="hint">click image: actual size · click outside or Esc: close</span><img id="viewer-img" alt=""></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+try{if(window.hljs){hljs.configure({ignoreUnescapedHTML:true});document.querySelectorAll('.code pre code').forEach(function(el){hljs.highlightElement(el);});}}catch(_){}
+</script>
+<script>
+document.querySelectorAll('.code .copy').forEach(function(b){b.addEventListener('click',function(){
+  var c=b.parentNode.querySelector('code'), t=c.textContent;
+  function done(ok){b.textContent=ok?'Copied':'Select and copy';setTimeout(function(){b.textContent='Copy';},1600);}
+  function fallback(){var r=document.createRange();r.selectNodeContents(c);var sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);done(false);}
+  try{navigator.clipboard.writeText(t).then(function(){done(true);},fallback);}catch(_){fallback();}
+});});
+</script>
+<script>
+document.querySelectorAll('.toc a, a.cite').forEach(function(a){a.addEventListener('click',function(e){
+  var t=document.getElementById(a.getAttribute('href').slice(1)); if(!t)return; e.preventDefault();
+  var d=t.closest('details'); if(d)d.open=true;
+  t.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+  try{history.replaceState(null,'','#'+t.id);}catch(_){}
+});});
+</script>
+<script>
+(function(){
+  var v=document.getElementById('viewer'), vi=document.getElementById('viewer-img');
+  function open(src,alt){vi.src=src;vi.alt=alt||'';v.hidden=false;document.body.style.overflow='hidden';}
+  function close(){v.classList.remove('native');v.hidden=true;vi.removeAttribute('src');document.body.style.overflow='';}
+  document.querySelectorAll('.zoom').forEach(function(b){b.addEventListener('click',function(){open(b.dataset.src,b.querySelector('img').alt);});});
+  document.querySelectorAll('.sheet img').forEach(function(im){im.addEventListener('click',function(){open(im.getAttribute('src'),im.alt);});});
+  vi.addEventListener('click',function(e){e.stopPropagation();v.classList.toggle('native');});
+  v.addEventListener('click',close);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!v.hidden)close();});
+})();
+</script>
+
+<script>
+(function(){ // keep text, captions and the theme footer in the same column as the post title
+  function fit(){ var t=document.querySelector('header h1'); if(!t) return;
+    document.documentElement.style.setProperty('--title-col', Math.round(t.parentElement.getBoundingClientRect().width)+'px'); }
+  fit(); window.addEventListener('resize', fit);
+})();
+</script>
+</div>
+{% endraw %}
