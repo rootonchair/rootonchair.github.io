@@ -6,7 +6,7 @@ tags: [en, quantization, diffusion, apple-silicon]
 comments: true
 full-width: true
 author: Pham Hong Vinh
-excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal kernels run the 4-bit layers as int8 matmuls on the M5 Neural Accelerators, 1.47x faster than mflux q4 on FLUX.1-dev at similar memory."
+excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal kernels run the 4-bit layers as int8 matmuls on the M5 Neural Accelerators, 1.53x faster than mflux q4 on FLUX.1-dev at similar memory."
 ---
 {% raw %}
 <div class="asi">
@@ -139,7 +139,7 @@ excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal k
 <nav class="toc" aria-label="Outline"><div class="eyebrow">Outline</div><ol><li><a href="#two-runtimes">Two runtimes</a></li><li><a href="#how-the-4-bit-layers-run">How the 4-bit layers run on M5</a></li><li><a href="#latency-and-memory">Latency and memory</a></li><li><a href="#visual-comparison">Visual comparison</a></li><li><a href="#image-editing">Image editing</a></li><li><a href="#try-it">Try it</a></li><li><a href="#limitations">Limitations and next steps</a></li></ol></nav>
 
 <div class="grid">
- <div class="card"><div class="k">FLUX.1-dev, MLX</div><div class="v">1.47× faster</div><div class="d">7.70 s vs 11.28 s per step against mflux q4, 1024², 20 steps</div></div>
+ <div class="card"><div class="k">FLUX.1-dev, MLX</div><div class="v">1.53× faster</div><div class="d">7.45 s vs 11.39 s per step against mflux q4, 1024², 20 steps</div></div>
  <div class="card"><div class="k">FLUX.2 Klein 9B, MLX</div><div class="v">1.61× faster</div><div class="d">4.39 s vs 7.09 s per step, int4, peak 10.4 vs 10.3 GB</div></div>
  <div class="card"><div class="k">Quality vs bf16, Klein 4B</div><div class="v">on par</div><div class="d">PSNR <span class="dir">↑</span> 17.8 dB (Nunchaku) vs 17.5 dB (mflux q4) against the bf16 transformer, mean of 3 prompts; the gap is within the per-prompt spread</div></div>
  <div class="card"><div class="k">Image editing, Klein 4B, MLX</div><div class="v">1.62× faster</div><div class="d">4.66 s vs 7.54 s per step against mflux q4; the same checkpoint loads into mflux&#39;s edit pipeline</div></div>
@@ -187,7 +187,7 @@ excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal k
 
 <h3 id="attention">Attention</h3>
 <p>With the projections running in int8, attention and the small operations around it become a large share of each step. Two changes keep them on the accelerators as well.</p>
-<p>Before attention, FLUX normalizes each head of the queries and keys (RMSNorm) and applies rotary position embeddings. Both runtimes ran this as a chain of float32 elementwise operations with reshapes in between, which costs about as much as attention itself on Klein. It is now a single kernel that reads q, k and v straight out of the projection's output and writes them in the layout attention expects. The same kernel source is built by MLX and by PyTorch.</p>
+<p>Before attention, FLUX.1, FLUX.2, Qwen-Image and Z-Image all normalize each head of the queries and keys (RMSNorm) and apply rotary position embeddings. Both runtimes ran this as a chain of float32 elementwise operations with reshapes in between, which costs about as much as attention itself on Klein. It is now a single kernel that reads q, k and v straight out of the projection's output and writes them in the layout attention expects, for all four families. The same kernel source is built by MLX and by PyTorch. On PyTorch MPS it takes FLUX.1-dev from 6.37 to 5.24 s per step.</p>
 <p>Attention itself runs fast on MLX: its built-in kernel uses the Neural Accelerators and reaches about 13 TFLOPS of the 15 available in bf16. PyTorch's attention on MPS runs at about 3.5 TFLOPS on the M5. MLX's kernel source is MIT-licensed, so the PyTorch runtime compiles a copy of it at load time and calls it on PyTorch tensors, without MLX installed. At Klein's shape (24 heads, 4,608 tokens) one attention call goes from 74 ms to 20 ms, and its error against a float32 reference is about a third of PyTorch's.</p>
 
 <h2 id="latency-and-memory">Latency and memory</h2>
@@ -201,8 +201,8 @@ excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal k
 <tr><td>FLUX.2 Klein 9B</td><td>mflux q4</td><td class="n">7.09 s</td><td class="n">—</td><td class="n">10.3 GB</td></tr>
 <tr><td>FLUX.2 Klein 9B</td><td>Nunchaku int8</td><td class="n">4.73 s</td><td class="n good">1.50×</td><td class="n">15.7 GB</td></tr>
 <tr><td>FLUX.2 Klein 9B</td><td>Nunchaku int4</td><td class="n">4.39 s</td><td class="n good">1.61×</td><td class="n">10.4 GB</td></tr>
-<tr><td>FLUX.1-dev</td><td>mflux q4</td><td class="n">11.28 s</td><td class="n">—</td><td class="n">21.9 GB</td></tr>
-<tr><td>FLUX.1-dev</td><td>Nunchaku int4</td><td class="n">7.70 s</td><td class="n good">1.47×</td><td class="n">22.7 GB</td></tr>
+<tr><td>FLUX.1-dev</td><td>mflux q4</td><td class="n">11.39 s</td><td class="n">—</td><td class="n">21.9 GB</td></tr>
+<tr><td>FLUX.1-dev</td><td>Nunchaku int4</td><td class="n">7.45 s</td><td class="n good">1.53×</td><td class="n">22.7 GB</td></tr>
 </tbody></table></div>
 <p>Not every model has every row because some configurations don't fit in 24 GB. A bf16 transformer is 18 GB for Klein 9B and 24 GB for FLUX.1-dev, too large to run next to the text encoder. FLUX.1-dev int8 would need about 7 GB more than int4 for the expanded weights, roughly 29 GB at peak, so it isn't shown; <code>auto</code> picks int4 for it.</p>
 <p>Peak memory is the whole pipeline, text encoder and VAE included. On FLUX.1-dev both peaks come from the VAE decode at 1024², which adds about 12 GB in both pipelines; during denoising, Nunchaku's transformer step adds less than mflux's. Klein 9B int8 is slower than int4 on 24 GB because its int8 weights push the pipeline into swap, which is why <code>auto</code> picks int4 there.</p>
