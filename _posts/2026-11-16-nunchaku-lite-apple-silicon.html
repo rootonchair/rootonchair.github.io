@@ -149,12 +149,13 @@ excerpt: "Nunchaku Lite SVDQuant 4-bit checkpoints on Apple silicon: new Metal k
 <p>Nunchaku Lite loads Nunchaku SVDQuant checkpoints into existing pipelines instead of shipping its own. On a Mac there are two pipeline ecosystems, so there are two runtimes.</p>
 <div class="tbl"><table><thead><tr><th></th><th>PyTorch MPS</th><th>MLX</th></tr></thead><tbody>
 <tr><td>Pipelines</td><td>Diffusers</td><td>mflux</td></tr>
-<tr><td>Model adapters</td><td>the CUDA adapters, unchanged</td><td>written for mflux's modules (FLUX.1, FLUX.2 Klein, generic manifest)</td></tr>
+<tr><td>Model adapters</td><td>the CUDA adapters, unchanged</td><td>written for mflux's modules (FLUX.1, FLUX.2 Klein, Z-Image, Qwen-Image, generic manifest)</td></tr>
 <tr><td>Quantized layers</td><td>Metal kernels in <code>nunchaku-lite-kernels</code></td><td>Metal kernels through <code>mx.fast.metal_kernel</code></td></tr>
 <tr><td>Install</td><td><code>pip install "nunchaku-lite[torch]"</code> (Metal kernels download from the Hugging Face Hub)</td><td><code>pip install "nunchaku-lite[mlx]" mflux</code></td></tr>
 <tr><td>Best for</td><td>Diffusers features: LoRA, CPU offload, every Diffusers pipeline</td><td>speed on the Klein models, and comparison with mflux q4</td></tr>
 </tbody></table></div>
 <p>Both read the same checkpoints, including the <code>lite-infer</code> repos with a runtime manifest and older lite checkpoints that list their quantized layers in <code>config.json</code>.</p>
+<p>FLUX.1-dev, FLUX.2 Klein 4B and 9B, Z-Image Turbo and Qwen-Image Lightning run end to end on both runtimes, from the original Nunchaku checkpoints as well as the lite ones. A Nunchaku checkpoint holds the whole transformer, so the MLX loader builds an empty one and fills it from the checkpoint; the base model's transformer is never downloaded, which saves 23 GB for Z-Image Turbo and 38 GB for Qwen-Image.</p>
 
 <h2 id="how-the-4-bit-layers-run">How the 4-bit layers run on M5</h2>
 <h3 id="neural-accelerators">The M5 Neural Accelerators</h3>
@@ -306,7 +307,8 @@ image.save("klein4b.png")</code></pre></div>
 <li>The int8 and int4 backends need an M5-class GPU (Neural Accelerators) and macOS 26. Earlier Apple GPUs use the dequantized fallback.</li>
 <li>INT4 checkpoints only; NVFP4 is not supported on Apple silicon yet.</li>
 <li>The prebuilt Metal kernels on the Hugging Face Hub cover PyTorch 2.10 to 2.15; other PyTorch versions need a local build of <code>nunchaku-lite-kernels</code>.</li>
-<li>MLX adapters exist for FLUX.1 and FLUX.2 Klein; other families can use the generic manifest adapter.</li>
+<li>MLX adapters exist for FLUX.1, FLUX.2 Klein, Z-Image and Qwen-Image; other families can use the generic manifest adapter.</li>
+<li>Qwen-Image's 20B transformer is about 12 GB at int4. With its 7B text encoder it needs more than 24 GB, so on a 24 GB Mac the first step of each image swaps. On MLX, mflux keeps the bf16 text encoder resident during denoising; freeing it after encoding is next.</li>
 <li>Attention runs in bf16. Running its query-key product in int8, as SageAttention does on CUDA, would use the accelerators' faster integer path.</li>
 </ul>
 </div>
