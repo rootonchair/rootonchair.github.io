@@ -1,0 +1,443 @@
+---
+layout: post
+title: LTX-2.5 in 4 bits, without calibration data
+subtitle: Data-free NVFP4 and INT4 checkpoints for Lightricks' 22B video-and-audio model, a faster diffusion decoder and a lighter text encoder
+tags: [en, quantization, diffusion, video]
+comments: true
+full-width: true
+author: Pham Hong Vinh
+excerpt: "Nunchaku Lite quantizes LTX-2.5's 22B transformer to 4 bits with no calibration data: 11.2 GiB instead of 39.1 GiB, 1.83x faster per step than bf16 on an RTX PRO 6000, and 2.3 dB closer to bf16 than Lightricks' NVFP4."
+---
+{% raw %}
+<div class="ltx">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>.ltx{--syn-kw:#8a3b12;--syn-str:#2f6b3a;--syn-com:#8a8578;--syn-num:#1f5f8b;--syn-fn:#6b3fa0;--syn-var:#1f5f8b;--bg:#f7f6f2;--fg:#1d1d1b;--muted:#5d5b55;--line:#d9d6cc;--panel:#ffffff;--accent:#8a3b12;--good:#2c6b3f;--bad:#a0342c;
+ --display:"Source Serif 4",Georgia,serif;--body:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+.ltx{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.55;padding-inline:16px;padding-block:32px 64px}
+.ltx .wrap{max-width:1100px;margin:0 auto}
+.ltx h1{font-family:var(--display);font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.1;text-wrap:balance;margin:0 0 8px}
+.ltx h2{font-family:var(--display);font-weight:700;font-size:24px;margin:48px 0 12px;text-wrap:balance}
+.ltx h3{font-size:16px;font-weight:600;margin:24px 0 6px}
+.ltx p{max-width:72ch;margin:0 0 12px}
+.ltx .lede{font-size:18px;color:var(--muted);max-width:72ch}
+.ltx .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.ltx ul{max-width:72ch;padding-left:20px}
+.ltx li{margin-bottom:6px}
+.ltx .tbl{overflow-x:auto;border:1px solid var(--line);background:var(--panel);margin:12px 0 20px}
+.ltx table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+.ltx th,.ltx td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+.ltx th{font-weight:600;font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+.ltx td.n{font-family:var(--mono);text-align:right}
+.ltx th.n{text-align:right}
+.ltx td.good{color:var(--good);font-weight:600}
+.ltx td.bad{color:var(--bad);font-weight:600}
+.ltx .sheet{margin-block:16px 28px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2));margin-right:0}
+.ltx .sheet img{width:100%;max-width:100%;display:block;border:1px solid var(--line);background:#fff}
+.ltx .sheet figcaption{font-size:14px;color:var(--muted);max-width:80ch;margin-top:8px}
+.ltx .verdict{border-left:3px solid var(--accent);padding:4px 16px;margin:16px 0 24px;max-width:72ch}
+.ltx .verdict p{margin:4px 0}
+.ltx code{font-family:var(--mono);font-size:13px}
+.ltx .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin:12px 0 20px}
+.ltx .card{border:1px solid var(--line);background:var(--panel);padding:14px 16px;min-width:0}
+.ltx .card .k{font-family:var(--mono);font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.ltx .card .v{font-family:var(--display);font-size:26px;font-weight:700;margin:4px 0}
+.ltx .card .d{font-size:14px;color:var(--muted)}
+.ltx .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,520px),1fr));gap:18px;margin-block:12px 24px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2))}
+.ltx .g{margin:0;min-width:0}
+.ltx .g img{width:100%;max-width:100%;display:block;border:1px solid var(--line);background:#fff}
+.ltx .g figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.ltx details{margin:8px 0 16px}
+.ltx summary{cursor:pointer;font-weight:600}
+.ltx .vc{border:1px solid var(--line);background:var(--panel);padding:12px 14px;margin-block:12px 28px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2))}
+.ltx .vc .bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:10px;font-size:14px}
+.ltx .vc .bar .t{font-weight:600;margin-right:auto}
+.ltx .vc .seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.ltx .vc button,.ltx .vc select{font:inherit;font-size:13px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
+.ltx .vc button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ltx .vc .vgrid{display:grid;gap:14px}
+.ltx .vc .vrow{display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));gap:12px}
+@media (max-width:820px){.ltx .vc .vrow{grid-template-columns:1fr}}
+.ltx .vc .tile{min-width:0}
+.ltx .vc .tile video{width:100%;max-width:100%;display:block;background:#000;object-fit:contain}
+.ltx .vc .tile .lab{font-family:var(--mono);font-size:12px;color:var(--muted);margin:4px 0 0}
+.ltx .vc .note{font-size:13px;color:var(--muted);margin:8px 0 0}
+.ltx .steps{max-width:72ch;padding-left:22px}
+.ltx .steps li{margin-bottom:10px}
+.ltx .steps li p{margin:0 0 4px}
+.ltx mjx-container[display="true"]{overflow-x:auto;overflow-y:hidden;margin:6px 0 4px!important}
+.ltx .diag{margin:18px 0 26px}
+.ltx .diag .dscroll{overflow-x:auto;max-width:100%}
+.ltx .diag .dpair{display:flex;flex-wrap:wrap;gap:12px 24px}
+.ltx .diag .dpair svg.half{flex:1 1 340px;min-width:0;width:auto;max-width:100%;height:auto;color:var(--fg);font-family:var(--body)}
+.ltx .diag svg{display:block;width:100%;min-width:680px;height:auto;color:var(--fg);font-family:var(--body)}
+.ltx .diag figcaption{font-size:14px;color:var(--muted);max-width:80ch;margin-top:8px}
+.ltx .paths code{word-break:break-all}
+.ltx .vc .spd{font-size:13px;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+.ltx .code{position:relative;margin:10px 0 16px;max-width:72ch}
+.ltx .code pre{margin:0;overflow-x:auto;background:var(--panel);border:1px solid var(--line);padding:14px 16px;font-family:var(--mono);font-size:13px;line-height:1.55;color:var(--fg)}
+.ltx .code .copy{position:absolute;top:8px;right:8px;font:12px var(--mono);color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:3px 8px;cursor:pointer}
+.ltx .hljs-keyword,.ltx .hljs-built_in,.ltx .hljs-literal,.ltx .hljs-meta{color:var(--syn-kw)}
+.ltx .hljs-string,.ltx .hljs-subst{color:var(--syn-str)}
+.ltx .hljs-comment{color:var(--syn-com);font-style:italic}
+.ltx .hljs-number{color:var(--syn-num)}
+.ltx .hljs-title,.ltx .hljs-title.function_,.ltx .hljs-params{color:var(--syn-fn)}
+.ltx .hljs-variable,.ltx .hljs-attr,.ltx .hljs-template-variable{color:var(--syn-var)}
+.ltx .code .copy:hover,.ltx .code .copy:focus-visible{color:var(--accent);border-color:var(--accent)}
+.ltx .toc{border:1px solid var(--line);background:var(--panel);padding:14px 18px;margin:16px 0 20px;max-width:72ch}
+.ltx .toc .eyebrow{margin-bottom:6px}
+.ltx .toc ol{margin:0;padding-left:22px;columns:2 220px;column-gap:28px}
+.ltx .toc li{margin:0 0 6px;break-inside:avoid}
+.ltx .toc li>a{font-weight:600}
+.ltx .toc ul{margin:4px 0 0;padding-left:16px;list-style:none;font-size:13px}
+.ltx .toc ul li{margin:0 0 3px}
+.ltx .toc a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+.ltx .toc a:hover,.ltx .toc a:focus-visible{color:var(--accent);border-color:var(--accent)}
+.ltx h2,.ltx h3{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 12px)}
+.ltx .dir{font-family:var(--mono);color:var(--accent);font-weight:600;margin-left:2px}
+.ltx .legend{font-size:13px;color:var(--muted);margin:12px 0 -4px}
+.ltx .legend-inline{font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+.ltx .keyline{font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--panel);display:inline-block;padding:6px 10px;margin:4px 0 8px}
+.ltx .verdict{border-left:3px solid var(--accent);padding:4px 16px;margin:16px 0 24px;max-width:72ch}
+.ltx .verdict p{margin:4px 0}
+.ltx .cite{color:var(--accent);text-decoration:none;font-size:11px}
+.ltx .cite:hover{text-decoration:underline}
+.ltx .refs{max-width:80ch;font-size:14px;padding-left:22px}
+.ltx .refs li{margin-bottom:6px}
+.ltx .refs li:target{background:var(--panel)}
+.ltx .vcap{font-size:14px;color:var(--muted);max-width:80ch;margin:-16px 0 28px}
+.ltx .zoom{all:unset;display:block;cursor:zoom-in;width:100%}
+.ltx .zoom:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ltx .sheet img{cursor:zoom-in}
+.ltx #viewer{position:fixed;inset:0;background:rgba(0,0,0,.92);overflow:auto;z-index:10;padding:16px;cursor:zoom-out}
+.ltx #viewer img{display:block;width:100%;max-width:none;margin:0 auto;background:#fff;cursor:zoom-in}
+.ltx #viewer.native img{width:auto;cursor:zoom-out}
+.ltx #viewer .hint{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:16px;color:#fff;font-family:var(--mono);font-size:12px;background:rgba(0,0,0,.6);padding:4px 8px;border-radius:4px}
+.ltx{padding-inline:0;padding-block:8px 32px;font-size:16px;background:transparent;--bg:#ffffff;--panel:#fafaf8}
+.ltx h2,.ltx h3{scroll-margin-top:80px;margin-top:2em}
+.ltx a{color:var(--accent)}
+.ltx table{margin:0}
+.ltx .toc a{color:var(--fg)}
+.ltx #viewer{z-index:2000}
+.ltx code{color:inherit;background:transparent;padding:0;border-radius:0;font-size:13px}
+.ltx td{white-space:normal}
+.ltx th{white-space:nowrap}
+.ltx td:first-child{min-width:13em}
+.ltx td.n{min-width:7.5em}
+.ltx .wrap>p,.ltx .wrap>ul,.ltx .wrap>ol,.ltx .wrap>ol.steps,.ltx .wrap>h2,.ltx .wrap>h3,.ltx .wrap>.lede,.ltx .wrap>.verdict,.ltx .wrap>.toc,.ltx .wrap>details>summary,.ltx .vcap,.ltx .sheet figcaption,.ltx .diag figcaption{max-width:var(--title-col,730px);margin-inline:auto}
+.ltx .wrap>.keyline{display:block;max-width:var(--title-col,730px);margin-inline:auto}
+.ltx .code{max-width:var(--title-col,730px);margin-inline:auto}
+/* theme footer of this post (tags, share icons, prev/next): same centered column as the title */
+.blog-tags,#social-share-section,.pagination.blog-pager{max-width:var(--title-col,730px);margin-left:auto;margin-right:auto}
+.ltx .tbl{width:fit-content;max-width:100%;margin-inline:auto}
+.ltx table{width:auto}
+.ltx .vp{border:1px solid var(--line);background:var(--panel);padding:12px 14px;margin-block:12px 28px;box-sizing:border-box;width:min(1640px,100vw - 48px);margin-left:calc(50% - min(820px,(100vw - 48px)/2))}
+.ltx .vp.narrow{width:min(1100px,100vw - 48px);margin-left:calc(50% - min(550px,(100vw - 48px)/2))}
+.ltx .vp .bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:10px;font-size:14px}
+.ltx .vp .t{font-weight:600;margin-right:auto}
+.ltx .vp .seg{display:inline-flex;flex-wrap:wrap;gap:4px}
+.ltx .vp button,.ltx .vp select{font:inherit;font-size:13px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:4px 10px;cursor:pointer}
+.ltx .vp button[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ltx .vp video{width:100%;max-width:100%;display:block;background:#000;object-fit:contain}
+.ltx .vp .spd{font-size:13px;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
+.ltx .vp .cap{font-size:14px;color:var(--muted);margin:8px 0 0;max-width:none}
+.ltx .vp .cap q{font-style:italic;color:var(--fg)}
+.ltx .mg{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);background:var(--bg);padding:2px 6px;border-radius:3px;margin-right:6px}
+.ltx .pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px;margin:12px auto 24px;max-width:var(--title-col,730px)}
+.ltx .pair figure{margin:0;min-width:0}
+.ltx .pair video{width:100%;display:block;background:#000;aspect-ratio:768/512}
+.ltx .pair figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.ltx .todo{background:#fff3c4;border:1px dashed #b58900;color:#6b4e00;font-size:13px;padding:2px 6px}
+.ltx td.n b,.ltx td b{font-weight:600}
+</style>
+<div class="wrap">
+<p class="lede">LTX-2.5 is Lightricks' 22B model that generates video with a soundtrack from a text prompt. Its transformer alone is a 39.1 GiB file. Nunchaku Lite 0.5 ships it as a 4-bit SVDQuant checkpoint of 10.6 to 11.2 GiB, quantized from the weights alone with no calibration data: NVFP4 for Blackwell GPUs, INT4 with a Hadamard rotation for everything else.</p>
+
+<p class="keyline"><span class="dir">↑</span> higher is better &nbsp;·&nbsp; <span class="dir">↓</span> lower is better. PSNR and SSIM compare each video with the bf16 video for the same prompt, seed and GPU. Every video on this page is machine-generated.</p>
+
+<nav class="toc" aria-label="Outline"><div class="eyebrow">Outline</div><ol><li><a href="#why-4-bit">Why 4 bits for LTX-2.5</a></li><li><a href="#recipe">The data-free recipe</a></li><li><a href="#results">Results against bf16 and Lightricks' files</a></li><li><a href="#decoder">A faster diffusion decoder</a></li><li><a href="#text-encoder">Lower VRAM: the text encoder</a></li><li><a href="#ltx-core">In Lightricks' own code, and a flicker hunt</a></li><li><a href="#try-it">Try it</a></li><li><a href="#limitations">Limitations</a></li></ol></nav>
+
+<div class="grid">
+ <div class="card"><div class="k">Transformer file</div><div class="v">11.2 GiB</div><div class="d">NVFP4, from 39.1 GiB in bf16 (3.5× smaller). The INT4 file is 10.6 GiB</div></div>
+ <div class="card"><div class="k">Transformer step, RTX PRO 6000</div><div class="v">1.83× faster</div><div class="d">475 ms vs 870 ms per step for bf16, 768×512, 121 frames</div></div>
+ <div class="card"><div class="k">vs Lightricks' NVFP4</div><div class="v">+2.3 dB</div><div class="d">PSNR <span class="dir">↑</span> 21.12 vs 18.86 dB against bf16 at the same 4-bit format, in Diffusers</div></div>
+ <div class="card"><div class="k">Full clip, RTX PRO 6000</div><div class="v">6.2 s</div><div class="d">5-second 768×512 clip with audio: NVFP4 + fused decoder, vs 9.4 s for bf16 with the same decoder</div></div>
+</div>
+
+<div class="verdict">
+<p><strong>In one paragraph.</strong> Lightricks publishes its own INT8 and NVFP4 transformers for LTX-2.5. Their INT8 stays closest to bf16. Ours are the fastest and the smallest, and at the same bit width our NVFP4 is 2.3 dB closer to bf16 than theirs. If matching bf16 output matters more to you than speed and memory, use their INT8.</p>
+</div>
+
+<h2 id="why-4-bit">Why 4 bits for LTX-2.5</h2>
+<p>LTX-2.5 distilled makes a 5-second, 768×512 clip with sound in 8 denoising steps. The pipeline around its 22B transformer is large too: a Gemma 4 12B text encoder (22.3 GiB in bf16), video and audio VAEs, a vocoder and a diffusion decoder that turns latents into frames. With every part in bf16 on one GPU, the pipeline peaks at 76.8 GB, just inside an 80 GB A100.</p>
+<p>The transformer is the largest piece and the one that runs 8 times per clip, so it is where 4 bits pay off twice: in memory and, with 4-bit tensor-core kernels, in time per step.</p>
+
+<h2 id="recipe">The data-free recipe</h2>
+<p>The method is the one from the <a href="/2026-10-12-data-free-svdquant/">previous post</a>: each linear layer's weight is split into a rank-32 low-rank branch kept in bf16, which carries the outliers that 4 bits represent poorly, and a 4-bit residual. Everything is computed from the weights alone. There is no calibration set, no captured activations and no per-model tuning: the same 1,344 linear layers of the transformer are selected automatically and quantized the same way.</p>
+<p>What changes is the 4-bit format, which follows the GPU:</p>
+<div class="tbl"><table><thead><tr><th>GPU</th><th>format</th><th>recipe</th><th class="n">file ↓</th></tr></thead><tbody>
+<tr><td>Blackwell (tested: RTX PRO 6000)</td><td>NVFP4 weights and activations, rank 32</td><td>no smoothing, no rotation</td><td class="n">11.2 GiB</td></tr>
+<tr><td>other CUDA GPUs (tested: A100, L40S)</td><td>INT4 weights and activations, rank 32</td><td>smoothing exponent 0, Hadamard rotation on the input of all 1,344 quantized layers</td><td class="n">10.6 GiB</td></tr>
+</tbody></table></div>
+<p>The rotation mixes each layer's input channels with a Hadamard transform before quantizing, which spreads outliers across channels so that the INT4 grid wastes less of its range on them. It is stored in the checkpoint and applied automatically at load time. On FLUX.2-klein, rotation improved INT4 by about 1.7 dB of per-layer output SQNR and made NVFP4 worse, which is why only the INT4 file uses it. That comparison was not repeated on LTX-2.5.</p>
+
+<h2 id="results">Results against bf16 and Lightricks' files</h2>
+<p>Every row below runs in the same Diffusers pipeline with the same default (tiled) decoder: 6 prompts with people, 768×512, 121 frames, 8 steps. Lightricks' files ship in ComfyUI format, so they run here through ComfyUI's <code>comfy-kitchen</code> kernels inside the Diffusers pipeline; inside ComfyUI they may be faster or slower.</p>
+<h3>Blackwell: RTX PRO 6000</h3>
+<div class="tbl"><table><thead><tr><th>transformer</th><th class="n">file ↓</th><th class="n">per step ↓</th><th class="n">s/clip ↓</th><th class="n">peak VRAM ↓</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th></tr></thead><tbody>
+<tr><td>bf16</td><td class="n">39.1 GiB</td><td class="n">870 ms</td><td class="n">10.9</td><td class="n">76.8 GB</td><td class="n">—</td><td class="n">—</td></tr>
+<tr><td><b>Nunchaku Lite NVFP4 r32</b></td><td class="n good">11.2 GiB</td><td class="n good">475 ms</td><td class="n good">8.0</td><td class="n good">52.6 GB</td><td class="n">21.12 dB</td><td class="n">0.722</td></tr>
+<tr><td>Lightricks INT8</td><td class="n">20.0 GiB</td><td class="n">658 ms</td><td class="n">9.2</td><td class="n">57.7 GB</td><td class="n good">26.09 dB</td><td class="n good">0.864</td></tr>
+<tr><td>Lightricks NVFP4</td><td class="n">17.4 GiB</td><td class="n">786 ms</td><td class="n">10.2</td><td class="n">55.2 GB</td><td class="n">18.86 dB</td><td class="n">0.671</td></tr>
+</tbody></table></div>
+<h3>Other GPUs: A100 80GB</h3>
+<p>NVFP4 needs Blackwell, so on an A100 the choice is between bf16, our INT4 and Lightricks' INT8.</p>
+<div class="tbl"><table><thead><tr><th>transformer</th><th class="n">file ↓</th><th class="n">s/clip ↓</th><th class="n">peak VRAM ↓</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th></tr></thead><tbody>
+<tr><td>bf16</td><td class="n">39.1 GiB</td><td class="n">18.5</td><td class="n">76.8 GB</td><td class="n">—</td><td class="n">—</td></tr>
+<tr><td><b>Nunchaku Lite INT4 r32 + rotation</b></td><td class="n good">10.6 GiB</td><td class="n good">15.3</td><td class="n good">52.1 GB</td><td class="n">17.15 dB</td><td class="n">0.659</td></tr>
+<tr><td>Lightricks INT8</td><td class="n">20.0 GiB</td><td class="n">20.7</td><td class="n">57.7 GB</td><td class="n good">21.67 dB</td><td class="n good">0.792</td></tr>
+</tbody></table></div>
+<p>Reading the two tables together:</p>
+<ul>
+<li><b>Fastest.</b> On the RTX PRO 6000 our transformer step is 1.83× faster than bf16, 1.39× faster than Lightricks' INT8 and 1.65× faster than Lightricks' NVFP4. On the A100 our INT4 file is the only option faster than bf16 (15.3 against 18.5 s per clip); Lightricks' INT8 is slower than bf16 there.</li>
+<li><b>Smallest.</b> 10.6 to 11.2 GiB against 17.4 to 20.0 GiB, and 2.6 to 5.6 GB lower peak VRAM than Lightricks' files.</li>
+<li><b>Better at 4 bits.</b> At the same NVFP4 format, ours is 2.3 dB closer to bf16 than Lightricks' (21.12 against 18.86 dB). The bf16 low-rank branch is the difference: it keeps the weight outliers out of the 4-bit grid.</li>
+<li><b>Lightricks' INT8 is closest to bf16</b>, by about 5 dB on Blackwell (26.09 against 21.12) and 4.5 dB on the A100 (21.67 against 17.15). With twice the bits per weight, that is expected.</li>
+</ul>
+<p>A lower PSNR means the video differs more from the bf16 video for the same seed. It does not have to mean the video looks worse: a distilled 8-step model turns small numerical differences into a slightly different pose or camera path, and PSNR punishes that as much as it punishes blur. Watch the comparisons below.</p>
+<p>One more caveat on precision: our quantized path is not bit-reproducible from run to run. Mean PSNR moves by about 0.3 dB between runs, and one A100 rerun of the same INT4 file scored 22.4 dB against the first run. Treat differences of a few tenths of a dB as noise.</p>
+
+<div class="vp" data-set="compare"></div>
+
+<h2 id="decoder">A faster diffusion decoder</h2>
+<p>LTX-2.5 does not decode latents with a plain VAE: its decoder is itself a small diffusion model, and its last stage (stage 5) dominates decode time. Nunchaku Lite now ships three fused CUDA ops for that stage, in <code>nunchaku-lite-kernels</code> v3:</p>
+<ul>
+<li>per-head q/k RMSNorm and 3D RoPE in one kernel,</li>
+<li>residual add, RMSNorm and modulation in one kernel,</li>
+<li>SiLU gating.</li>
+</ul>
+<p>Attention stays on NATTEN: its default tiles were the fastest we tried, and there was no faster attention backend for the RTX PRO 6000's architecture. The decoder kernels work with any transformer; the bf16 numbers below use them too.</p>
+<div class="tbl"><table><thead><tr><th>decode of 768×512×121, RTX PRO 6000</th><th class="n">time ↓</th></tr></thead><tbody>
+<tr><td>Diffusers default (tiled)</td><td class="n">3.24 s</td></tr>
+<tr><td>untiled</td><td class="n">2.77 s</td></tr>
+<tr><td>fused kernels + untiled</td><td class="n good">1.84 s</td></tr>
+</tbody></table></div>
+<p>The fused decoder matches the unfused one to 56.6 dB PSNR (largest pixel difference 7/255), the difference that reordering floating-point reductions leaves. End to end, a full NVFP4 clip goes from 8.0 to 6.2 s (55.2 GB peak) and a bf16 clip from 10.9 to 9.4 s.</p>
+
+<h2 id="text-encoder">Lower VRAM: the text encoder</h2>
+<p>Once the transformer is 11 GiB, the largest component left is the Gemma 4 12B text encoder at 22.3 GiB. Nunchaku Lite 0.5.1 adds <code>load_text_encoder_bnb</code>, which loads it with bitsandbytes 8-bit or NF4 weights straight onto the GPU. RTX PRO 6000, NVFP4 transformer, fused decoder, everything on the GPU:</p>
+<div class="tbl"><table><thead><tr><th>text encoder</th><th class="n">size ↓</th><th class="n">hidden-state error vs bf16 ↓</th><th class="n">peak VRAM ↓</th><th class="n">s/clip ↓</th></tr></thead><tbody>
+<tr><td>bf16</td><td class="n">22.3 GiB</td><td class="n">—</td><td class="n">55.2 GB</td><td class="n good">6.2</td></tr>
+<tr><td>bitsandbytes 8-bit</td><td class="n">12.1 GiB</td><td class="n">1.1%</td><td class="n">46.4 GB</td><td class="n">6.4</td></tr>
+<tr><td>bitsandbytes NF4</td><td class="n good">7.0 GiB</td><td class="n">2.9%</td><td class="n good">41.9 GB</td><td class="n">7.0</td></tr>
+</tbody></table></div>
+<p>With NF4 the whole pipeline peaks at 41.9 GB, down from 76.8 GB for the all-bf16 pipeline. Clip-level PSNR cannot rank the three encoders: the spread between prompts (2 to 5 dB) is larger than the differences between them, so compare a few videos for your own prompts. We also built a data-free W4A16 encoder of our own (7.7 GiB, 3.2% error). It did no better than NF4, so 0.5.1 removed it in favour of bitsandbytes.</p>
+
+<h2 id="ltx-core">In Lightricks' own code, and a flicker hunt</h2>
+<p>Diffusers is one way to run LTX-2.5; Lightricks' own <a href="https://github.com/Lightricks/LTX-2"><code>ltx-core</code> / <code>ltx-pipelines</code></a> is the other. Support for it is in progress in <a href="https://github.com/rootonchair/nunchaku-lite/pull/23">nunchaku-lite PR #23</a>, open and ready for review. It splices our quantized layers into Lightricks' own bf16 transformer file, leaving every other tensor byte-identical, and loads the result through an ltx-core <code>QuantizationPolicy</code>, the same mechanism as Lightricks' <code>nvfp4-prequant</code>. Lightricks' loader, its key checks, streaming and offloading then work as they do for any checkpoint.</p>
+<p>Lightricks' <code>DistilledPipeline</code>, 768×512, 121 frames, 16 prompts, each clip scored against the bf16 clip of the same seed in the same pipeline:</p>
+<div class="tbl"><table><thead><tr><th>transformer</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th><th class="n">flicker ↓</th><th class="n">transformer s/clip ↓</th><th class="n">peak VRAM ↓</th></tr></thead><tbody>
+<tr><td colspan="6"><i>RTX PRO 6000 (Blackwell), NVFP4</i></td></tr>
+<tr><td>bf16 (Lightricks)</td><td class="n">—</td><td class="n">—</td><td class="n">7.52</td><td class="n">4.46</td><td class="n">36.2 GB</td></tr>
+<tr><td>Lightricks NVFP4</td><td class="n good">18.43</td><td class="n good">0.570</td><td class="n good">8.14</td><td class="n good">2.87</td><td class="n">24.2 GB</td></tr>
+<tr><td><b>Nunchaku Lite NVFP4 r32</b></td><td class="n">18.09</td><td class="n">0.558</td><td class="n">9.68</td><td class="n">3.01</td><td class="n">24.2 GB</td></tr>
+<tr><td colspan="6"><i>L40S, INT4</i></td></tr>
+<tr><td>bf16 (Lightricks)</td><td class="n">—</td><td class="n">—</td><td class="n">7.53</td><td class="n">7.32</td><td class="n">—</td></tr>
+<tr><td><b>Nunchaku Lite INT4 r32 + rotation</b></td><td class="n">17.87</td><td class="n">0.550</td><td class="n">9.94</td><td class="n good">4.85</td><td class="n">—</td></tr>
+</tbody></table></div>
+<p><span class="todo">TODO (author): one sentence defining the flicker score (how it is computed from the MP4s). It is not in the fact sheet.</span></p>
+<p>This pipeline tells a different story from Diffusers. Its two-stage pipeline uses an ancestral sampler, which amplifies any numerical difference, so absolute PSNR is lower for every file. Here Lightricks' NVFP4 is slightly ahead of ours on PSNR (by 0.34 dB, close to our run-to-run noise), SSIM and transformer time, and clearly ahead on flicker. Ours still runs the transformer about 1.5× faster than bf16 on both GPUs, and the INT4 file covers GPUs where NVFP4 does not run.</p>
+<p>The flicker gap was the interesting part. Lightricks' NVFP4 file keeps the last 6 transformer blocks (42 to 47) in bf16; ours quantizes all 48. Splicing our layers into blocks 0 to 41 only, and keeping 42 to 47 in bf16 as Lightricks does, closes about 70% of the gap. On an RTX PRO 4500 Blackwell, over 10 clips:</p>
+<div class="tbl"><table><thead><tr><th>Nunchaku Lite NVFP4 r32</th><th class="n">mean flicker ↓</th><th class="n">gap to Lightricks NVFP4 ↓</th><th class="n">steadier than all 48</th></tr></thead><tbody>
+<tr><td>all 48 blocks quantized (published)</td><td class="n">8.98</td><td class="n">+1.36</td><td class="n">—</td></tr>
+<tr><td>blocks 42–47 kept bf16</td><td class="n good">8.04</td><td class="n good">+0.42</td><td class="n">9 of 10 clips</td></tr>
+<tr><td><i>Lightricks NVFP4 (reference)</i></td><td class="n">7.62</td><td class="n">—</td><td class="n">—</td></tr>
+</tbody></table></div>
+<p>Two other suspects were ruled out. Restricting which layer types are quantized, in all 48 blocks, did not change flicker. Nor did the activation scales: we quantize activations with scales computed on the fly, Lightricks with fixed scales stored in the file, but emulating both on the CPU gave the same quantization error and the same frame-to-frame noise.</p>
+<p>So why do the published files still quantize all 48 blocks? Because side by side the difference is hard to see. Play the clips below at 0.25× and judge for yourself; the difference maps (frame-to-frame change, amplified) make it easier to spot. The files stay smaller with all 48 blocks quantized, and PR #23's splice tool takes a <code>--targets-regex</code> option for anyone who prefers the steadier variant.</p>
+
+<div class="vp" data-set="flicker"></div>
+
+<h2 id="try-it">Try it</h2>
+<p>Nunchaku Lite 0.5.1 is on PyPI (release notes: <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.5.0">0.5.0</a>, <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.5.1">0.5.1</a>). LTX-2.5 needs Diffusers 0.43 or newer, and the decoder speed-up needs the v3 kernels, which download from the Hugging Face Hub on first use.</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">pip install nunchaku-lite                # CUDA kernels download from the Hugging Face Hub
+pip install "nunchaku-lite[bnb]"         # optional: 8-bit / NF4 text encoder</code></pre></div>
+<p>The two checkpoints are in <a href="https://huggingface.co/rootonchair/nunchaku-lite-ltx-2.5-distilled"><code>rootonchair/nunchaku-lite-ltx-2.5-distilled</code></a>: <code>svdq-fp4_r32-ltx-2.5-distilled.safetensors</code> for Blackwell and <code>svdq-int4_r32-ltx-2.5-distilled.safetensors</code> for other CUDA GPUs. They are derivatives of LTX-2.5 under Lightricks' LTX-2.x Community License, which has its own terms, including for commercial use and for labeling generated content.</p>
+<h3>Convert the base model once</h3>
+<p>The repo holds only the transformer. The text encoder, VAEs, vocoder and diffusion decoder come from the base model in the Diffusers folder layout, and Lightricks ships LTX-2.5 as single files. Accept the license of the gated <code>Lightricks/LTX-2.5</code> repo, log in, and convert with the script in the Nunchaku Lite repository. It downloads 72 GB.</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">hf auth login
+python tools/convert_ltx25_distilled.py --out ltx-2.5-distilled-diffusers</code></pre></div>
+<h3>Generate</h3>
+<p>Text to video with audio, 768×512, 121 frames, 8 steps. Set <code>precision</code> to <code>"fp4"</code> on Blackwell and <code>"int4"</code> elsewhere.</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">import json
+import os
+
+import torch
+from transformers import AutoModelForImageTextToText, AutoTokenizer
+
+import diffusers
+import diffusers.pipelines.ltx2 as ltx2
+from diffusers import FlowMatchEulerDiscreteScheduler, LTX2Guidance, LTX2VideoTransformer3DModel, LTX25AutoBlocks
+from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES
+from diffusers.utils import encode_video
+
+from nunchaku_lite import patch_transformer
+from nunchaku_lite.adapters.ltx2_decoder import optimize_ltx2_diffusion_decoder
+
+model_dir = "ltx-2.5-distilled-diffusers"  # from tools/convert_ltx25_distilled.py
+precision = "fp4"  # "fp4" on Blackwell, "int4" elsewhere
+checkpoint = f"rootonchair/nunchaku-lite-ltx-2.5-distilled/svdq-{precision}_r32-ltx-2.5-distilled.safetensors"
+device = "cuda"
+
+# 1. quantized transformer
+transformer = LTX2VideoTransformer3DModel.from_pretrained(
+    model_dir, subfolder="transformer", torch_dtype=torch.bfloat16
+)
+patch_transformer(transformer, checkpoint, target="ltx2", precision=precision, device=device)
+
+
+# 2. the other components, bf16
+def load_component(name):
+    path = os.path.join(model_dir, name)
+    class_name = json.load(open(os.path.join(path, "config.json")))["_class_name"]
+    cls = getattr(diffusers, class_name, None) or getattr(ltx2, class_name)
+    return cls.from_pretrained(path, torch_dtype=torch.bfloat16)
+
+
+guidance = dict(guidance_scale=1.0, stg_scale=0.0, modality_scale=1.0, guidance_rescale=0.0,
+                spatio_temporal_guidance_blocks=None)  # distilled model: no guidance
+components = {
+    "transformer": transformer,
+    "text_encoder": AutoModelForImageTextToText.from_pretrained(
+        os.path.join(model_dir, "text_encoder"), torch_dtype=torch.bfloat16
+    ),
+    "tokenizer": AutoTokenizer.from_pretrained(os.path.join(model_dir, "tokenizer")),
+    "scheduler": FlowMatchEulerDiscreteScheduler.from_pretrained(os.path.join(model_dir, "scheduler")),
+    "guider": LTX2Guidance(**guidance),
+    "audio_guider": LTX2Guidance(**guidance),
+    **{name: load_component(name) for name in
+       ("connectors", "vae", "audio_vae", "vocoder", "diffusion_decoder", "duration_head")},
+}
+
+# 3. pipeline, all on the GPU
+pipe = LTX25AutoBlocks().init_pipeline()
+pipe.update_components(**components)
+for component in pipe.components.values():
+    if isinstance(component, torch.nn.Module):
+        component.to(device)
+
+# 4. faster diffusion decoder (needs the v3 kernels)
+optimize_ltx2_diffusion_decoder(pipe.diffusion_decoder)
+pipe.diffusion_decoder.disable_tiling()
+
+# 5. generate
+steps = 8
+state = pipe(
+    prompt="A golden retriever runs through a sunlit meadow of tall grass, ears flapping, birds chirping.",
+    width=768,
+    height=512,
+    num_frames=121,
+    frame_rate=24.0,
+    num_inference_steps=steps,
+    sigmas=DISTILLED_SIGMA_VALUES[:steps],
+    use_cross_timestep=True,
+    enable_prompt_enhancement=False,
+    generator=torch.Generator(device).manual_seed(0),
+    output_type="np",
+)
+video, audio = state.get("videos"), state.get("audio")
+encode_video(
+    video[0],
+    fps=24.0,
+    audio=audio[0].float().cpu(),
+    audio_sample_rate=pipe.vocoder.config.output_sampling_rate,
+    output_path="ltx25_nunchaku_lite.mp4",
+)</code></pre></div>
+<p>The script ran as written on an RTX PRO 6000 with both files, peaking at 55.8 GiB of VRAM with NVFP4 and 55.3 GiB with INT4. These are its two outputs:</p>
+<div class="pair">
+ <figure><video controls playsinline preload="none" poster="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/usage_golden_retriever_fp4.webp" src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/usage/golden_retriever_fp4.mp4"></video><figcaption><span class="mg">Machine-generated</span>LTX-2.5 with the NVFP4 transformer, seed 0, with audio.</figcaption></figure>
+ <figure><video controls playsinline preload="none" poster="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/usage_golden_retriever_int4.webp" src="https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/usage/golden_retriever_int4.mp4"></video><figcaption><span class="mg">Machine-generated</span>LTX-2.5 with the INT4 transformer, seed 0, with audio.</figcaption></figure>
+</div>
+<p>To fit a smaller GPU, swap in the bitsandbytes text encoder: replace the <code>"text_encoder"</code> entry, and skip it when moving components to the GPU, since it is loaded there already.</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">from nunchaku_lite.text_encoders import load_text_encoder_bnb
+
+components["text_encoder"] = load_text_encoder_bnb(
+    AutoModelForImageTextToText, os.path.join(model_dir, "text_encoder"), quantization="nf4", device=device
+)  # or quantization="int8"
+
+# step 3: move everything else
+for name, component in pipe.components.items():
+    if isinstance(component, torch.nn.Module) and name != "text_encoder":
+        component.to(device)</code></pre></div>
+<p>The <a href="https://github.com/rootonchair/nunchaku-lite/blob/main/docs/models/ltx2.md">full LTX-2.5 guide</a> has the rest: conversion options, the per-GPU tables, and decoder details.</p>
+
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>LTX-2.5 support is a preview. The checkpoints cover the distilled model only.</li>
+<li>NVFP4 runs only on Blackwell GPUs. On other CUDA GPUs, use the INT4 file.</li>
+<li>Loading the transformer reads the bf16 weights first (about 44 GB of CPU memory) before replacing them with the quantized ones, and converting the base model needs about 85 GB of CPU memory.</li>
+<li>Untiled decoding is faster but needs about 13.5 GB more VRAM at 768×512×121. Tiled and untiled decodes differ from each other (about 30 dB PSNR), so compare outputs only between runs that decode the same way.</li>
+<li>The quantized path is not bit-reproducible from run to run (about 0.3 dB of mean PSNR).</li>
+<li>Running in Lightricks' <code>ltx-core</code> is not released yet (PR #23). There, our NVFP4 flickers more than Lightricks' NVFP4, as described above.</li>
+</ul>
+</div>
+<script id="vman" type="application/json">{"compare": {"title": "Diffusers, RTX PRO 6000: bf16 vs 4-bit transformers", "ar": "1536/1152", "modes": null, "note": "<span class=\"mg\">Machine-generated<\/span>Top: bf16 | Nunchaku Lite NVFP4 r32 (labeled &ldquo;this repo&rdquo;, as on the model card). Bottom: Lightricks INT8 | Lightricks NVFP4. Same prompt, seed and decoder in all four panels; the audio is the bf16 clip&rsquo;s. Each label shows transformer time per step, file size and that clip&rsquo;s PSNR against bf16. Each clip loads when you press play.", "items": [{"name": "woman speaking", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/compare_woman_speaking.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_woman_speaking.webp"}, "cap": ""}, {"name": "street dancer", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/compare_street_dancer.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_street_dancer.webp"}, "cap": ""}, {"name": "wild horses", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/compare_wild_horses.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_wild_horses.webp"}, "cap": ""}]}, "flicker": {"title": "ltx-core, RTX PRO 4500 Blackwell: where the flicker comes from", "ar": "2304/576", "modes": [["v", "video"], ["m", "difference map"]], "note": "<span class=\"mg\">Machine-generated<\/span>Left to right: Nunchaku Lite NVFP4 with all 48 blocks quantized (published) | ours with blocks 42–47 kept bf16 | Lightricks NVFP4. Same prompt and seed. The difference map shows amplified change from one frame to the next: steadier video is darker. Each clip (3 to 7 MB) loads when you press play.", "items": [{"name": "drummer (short prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_0.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_0_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_0.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_0_map.webp"}, "cap": "<q>A drummer performs an energetic solo on a small stage, colorful stage lights flashing in rhythm, cymbals shimmering, sticks moving fast, a crowd cheering.<\/q> Seed 42. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 8.71 · blocks 42–47 bf16 6.67 · Lightricks NVFP4 7.68."}, {"name": "ocean waves (short prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_1.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_1_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_1.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_1_map.webp"}, "cap": "<q>Large ocean waves crash against dark rocks at dusk, spray flying, seagulls calling overhead, deep rumbling surf.<\/q> Seed 43. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 3.57 · blocks 42–47 bf16 3.45 · Lightricks NVFP4 4.03."}, {"name": "rainy street (short prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_2.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_2_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_2.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_2_map.webp"}, "cap": "<q>A busy city street at night in heavy rain, neon signs reflecting on wet asphalt, umbrellas passing, cars hissing through puddles.<\/q> Seed 44. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 10.97 · blocks 42–47 bf16 10.44 · Lightricks NVFP4 8.46."}, {"name": "retriever (short prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_3.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_3_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_3.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_3_map.webp"}, "cap": "<q>A golden retriever runs through a sunlit meadow of tall grass, ears flapping, birds chirping, gentle wind in the trees.<\/q> Seed 45. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 5.34 · blocks 42–47 bf16 5.33 · Lightricks NVFP4 4.47."}, {"name": "fireworks (short prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_4.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/short_4_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_4.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_short_4_map.webp"}, "cap": "<q>Fireworks explode over a calm river at night, colorful reflections rippling on the water, booming echoes, a distant crowd cheering.<\/q> Seed 46. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 11.48 · blocks 42–47 bf16 10.05 · Lightricks NVFP4 8.09."}, {"name": "drummer (long prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_0.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_0_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_0.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_0_map.webp"}, "cap": "<q>A drummer with curly dark hair plays an energetic solo on a small club stage, his sticks blurring as they strike the snare and toms in a fast rolling pattern. The camera holds a medium side shot, slowly pushing in toward his face as sweat glints on his forehead. Red, blue and amber stage lights pulse in rhythm behind him, and the brass cymbals flash each time they are hit. Shadows of the crowd sway at the edge of the frame. The audio is a loud, tight drum solo with crashing cymbals, the thump of the kick drum, and a crowd cheering and whistling between fills.<\/q> Seed 42. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 6.70 · blocks 42–47 bf16 6.23 · Lightricks NVFP4 6.94."}, {"name": "ocean waves (long prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_1.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_1_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_1.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_1_map.webp"}, "cap": "<q>Large dark-blue ocean waves roll toward a cluster of black volcanic rocks at dusk and crash against them, throwing white spray high into the air. The camera stands low on the wet shore in a wide shot, holding steady as foam rushes up the sand and drains back between the stones. The sky glows pale orange and violet near the horizon while the water is lit in cool grey-blue. A few seagulls glide across the upper frame. The audio is the deep rumble of the surf, the sharp hiss and slap of each breaking wave, and gulls calling overhead.<\/q> Seed 43. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 8.16 · blocks 42–47 bf16 7.18 · Lightricks NVFP4 7.07."}, {"name": "rainy street (long prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_2.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_2_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_2.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_2_map.webp"}, "cap": "<q>A busy city street at night in heavy rain, seen from the sidewalk in a slow tracking shot that moves alongside the traffic. Cars with glowing headlights roll through deep puddles and throw up sheets of water. Red and teal neon signs above the shops reflect as long, rippling streaks on the wet black asphalt, and pedestrians with dark umbrellas hurry past in the foreground. Raindrops streak through the light of a street lamp. The audio is steady pouring rain, tires hissing through water, a car horn in the distance, and the patter of drops on umbrellas.<\/q> Seed 44. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 13.17 · blocks 42–47 bf16 11.35 · Lightricks NVFP4 11.23."}, {"name": "retriever (long prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_3.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_3_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_3.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_3_map.webp"}, "cap": "<q>A golden retriever runs straight toward the camera through a sunlit meadow of tall green grass, its ears flapping and its tongue out as it bounds forward. The camera is low to the ground and slowly tracks backward to keep the dog centered while it gets closer. Warm late-afternoon sunlight comes from behind, rimming its fur in gold, and the grass sways in a gentle breeze with soft trees out of focus in the background. The audio is the dog&#x27;s quick panting and paws thudding on the ground, grass rustling, birds chirping, and a light wind moving through the trees.<\/q> Seed 45. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 8.04 · blocks 42–47 bf16 7.59 · Lightricks NVFP4 7.37."}, {"name": "fireworks (long prompt)", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_4.mp4", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/flicker/long_4_map.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_4.webp", "m": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/flicker_long_4_map.webp"}, "cap": "<q>Fireworks burst over a calm wide river at night, blooming into large gold, red and green shells that sparkle and slowly fall as trails of light. The camera holds a steady wide shot from the riverbank, with the dark water filling the lower third of the frame and the dim outline of a city skyline along the far shore. Each burst lights up drifting smoke and is mirrored as rippling colored reflections on the water. The audio is the deep boom of each explosion echoing across the river, the crackle of falling sparks, and a distant crowd cheering.<\/q> Seed 46. Flicker <span class=\"dir\">↓<\/span>: all 48 blocks 13.65 · blocks 42–47 bf16 12.11 · Lightricks NVFP4 10.89."}]}}</script>
+<script>
+(function(){
+  var man=JSON.parse(document.getElementById('vman').textContent);
+  var all=[];
+  document.addEventListener('play',function(e){if(e.target.tagName!=='VIDEO')return;
+    document.querySelectorAll('.ltx video').forEach(function(v){if(v!==e.target&&!v.paused)v.pause();});},true);
+  document.querySelectorAll('.vp').forEach(function(root){
+    var g=man[root.dataset.set]; if(!g) return;
+    var rate=1, cur=0, mode='v';
+    root.innerHTML='<div class="bar"><span class="t"></span><span class="seg" data-role="scenes"></span>'+
+      (g.modes?'<span class="seg" data-role="modes"></span>':'')+
+      '<label class="spd">speed <select data-role="rate"><option value="1">1×</option><option value="0.5">0.5×</option><option value="0.25">0.25×</option></select></label></div>'+
+      '<video controls playsinline loop preload="none"></video><p class="cap" data-role="cap"></p><p class="cap">'+g.note+'</p>';
+    root.querySelector('.t').textContent=g.title;
+    var v=root.querySelector('video'); v.style.aspectRatio=g.ar;
+    v.addEventListener('play',function(){v.playbackRate=rate;});
+    var seg=root.querySelector('[data-role=scenes]'), cap=root.querySelector('[data-role=cap]');
+    function mk(parent,text,fn){var b=document.createElement('button');b.type='button';b.textContent=text;b.addEventListener('click',fn);parent.appendChild(b);return b;}
+    var sb=g.items.map(function(it,k){return mk(seg,it.name,function(){cur=k;show();});});
+    var mb=[]; if(g.modes){var ms=root.querySelector('[data-role=modes]');
+      mb=g.modes.map(function(m){return mk(ms,m[1],function(){mode=m[0];show();});});}
+    function show(){
+      sb.forEach(function(b,j){b.setAttribute('aria-pressed',j===cur);});
+      if(g.modes)mb.forEach(function(b,j){b.setAttribute('aria-pressed',g.modes[j][0]===mode);});
+      var it=g.items[cur]; v.pause(); v.removeAttribute('src'); v.load();
+      v.poster=it.poster[mode]; v.src=it.src[mode]; cap.innerHTML=it.cap; cap.hidden=!it.cap;}
+    root.querySelector('[data-role=rate]').addEventListener('change',function(e){rate=parseFloat(e.target.value);v.playbackRate=rate;});
+    show();
+  });
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+try{if(window.hljs){hljs.configure({ignoreUnescapedHTML:true});document.querySelectorAll('.code pre code').forEach(function(el){hljs.highlightElement(el);});}}catch(_){}
+</script>
+<script>
+document.querySelectorAll('.code .copy').forEach(function(b){b.addEventListener('click',function(){
+  var c=b.parentNode.querySelector('code'), t=c.textContent;
+  function done(ok){b.textContent=ok?'Copied':'Select and copy';setTimeout(function(){b.textContent='Copy';},1600);}
+  function fallback(){var r=document.createRange();r.selectNodeContents(c);var sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);done(false);}
+  try{navigator.clipboard.writeText(t).then(function(){done(true);},fallback);}catch(_){fallback();}
+});});
+</script>
+<script>
+document.querySelectorAll('.toc a, a.cite').forEach(function(a){a.addEventListener('click',function(e){
+  var t=document.getElementById(a.getAttribute('href').slice(1)); if(!t)return; e.preventDefault();
+  var d=t.closest('details'); if(d)d.open=true;
+  t.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
+  try{history.replaceState(null,'','#'+t.id);}catch(_){}
+});});
+</script>
+<script>
+(function(){ // keep text, captions and the theme footer in the same column as the post title
+  function fit(){ var t=document.querySelector('header h1'); if(!t) return;
+    document.documentElement.style.setProperty('--title-col', Math.round(t.parentElement.getBoundingClientRect().width)+'px'); }
+  fit(); window.addEventListener('resize', fit);
+})();
+</script>
+</div>
+{% endraw %}
