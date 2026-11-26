@@ -1,12 +1,12 @@
 ---
 layout: post
-title: Data-free SVDQuant in diffuse-compressor, tested on LTX-2.5
-subtitle: 4-bit NVFP4 and INT4 quantization of any Diffusers model from its weights alone, and what the same recipe does to Lightricks' 22B video-and-audio model
+title: "4-bit diffusion models with no calibration data, now in diffuse-compressor"
+subtitle: One flag turns any Diffusers image or video model into a fast NVFP4 or INT4 checkpoint. On LTX-2.5 it beats Lightricks' own NVFP4.
 tags: [en, quantization, diffusion, video]
 comments: true
 full-width: true
 author: Pham Hong Vinh
-excerpt: "diffuse-compressor gets a data-free SVDQuant path: 4-bit checkpoints from the weights alone, no calibration set. On LTX-2.5 the same recipe gives an 11.2 GiB transformer instead of 39.1 GiB, 1.83x faster per step than bf16 on an RTX PRO 6000, and 2.3 dB closer to bf16 than Lightricks' NVFP4."
+excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from its weights alone: no dataset, no prompts, no text encoder. On Lightricks' 22B LTX-2.5 the recipe gives a 3.5x smaller transformer that runs 1.83x faster than bf16 and lands 2.3 dB closer to bf16 than Lightricks' own NVFP4."
 ---
 {% raw %}
 <div class="ltx">
@@ -150,13 +150,13 @@ excerpt: "diffuse-compressor gets a data-free SVDQuant path: 4-bit checkpoints f
 .ltx td.n b,.ltx td b{font-weight:600}
 </style>
 <div class="wrap">
-<p class="lede">The <a href="/2026-10-12-data-free-svdquant/">previous post</a> showed that SVDQuant does not need a calibration set: a 4-bit checkpoint can be computed from a model's weights alone. <a href="https://github.com/rootonchair/diffuse-compressor/pull/27">diffuse-compressor PR #27</a> turns that recipe into one flag, <code>--data-free</code>, for any Diffusers text-to-image or text-to-video model. This post walks through what the PR adds and how to use it, then tests the recipe on a hard case: LTX-2.5, Lightricks' 22B model that generates video with a soundtrack, whose transformer is a 39.1 GiB file in bf16 and 10.6 to 11.2 GiB in 4 bits.</p>
+<p class="lede">Calibration is the part of 4-bit quantization nobody enjoys: pick a prompt set, load the whole pipeline, run it, capture activations, hope they are representative. <a href="https://github.com/rootonchair/diffuse-compressor">diffuse-compressor</a> no longer needs any of it. Add <code>--data-free</code> and it quantizes a Diffusers image or video model from its weights alone, loading nothing but the transformer, and writes a checkpoint that runs on Nunchaku Lite's 4-bit kernels. To show what that is worth, we pointed the recipe at one of the hardest open models around: LTX-2.5, Lightricks' 22B model that generates video with a soundtrack.</p>
 
 <p class="keyline"><span class="dir">↑</span> higher is better &nbsp;·&nbsp; <span class="dir">↓</span> lower is better. PSNR and SSIM compare each video with the bf16 video for the same prompt, seed and GPU. Every video on this page is machine-generated.</p>
 
-<nav class="toc" aria-label="Outline"><div class="eyebrow">Outline</div><ol><li><a href="#data-free">What PR #27 adds</a></li><li><a href="#quantize">Quantizing a model with it</a></li><li><a href="#why-4-bit">Test case: LTX-2.5</a></li><li><a href="#recipe">The recipe on LTX-2.5</a></li><li><a href="#results">Results against bf16 and Lightricks' files</a></li><li><a href="#decoder">A faster diffusion decoder</a></li><li><a href="#text-encoder">Lower VRAM: the text encoder</a></li><li><a href="#ltx-core">In Lightricks' own code, and a flicker hunt</a></li><li><a href="#try-it">Run the LTX-2.5 files</a></li><li><a href="#limitations">Limitations</a></li></ol></nav>
+<nav class="toc" aria-label="Outline"><div class="eyebrow">Outline</div><ol><li><a href="#data-free">One flag, no dataset</a></li><li><a href="#quantize">Quantize your own model</a></li><li><a href="#why-4-bit">The stress test: LTX-2.5</a></li><li><a href="#recipe">The recipe on LTX-2.5</a></li><li><a href="#results">Results against bf16 and Lightricks' files</a></li><li><a href="#decoder">A faster diffusion decoder</a></li><li><a href="#text-encoder">Lower VRAM: the text encoder</a></li><li><a href="#ltx-core">In Lightricks' own code, and a flicker hunt</a></li><li><a href="#try-it">Run the LTX-2.5 files</a></li><li><a href="#limitations">Limitations</a></li></ol></nav>
 
-<div class="eyebrow">LTX-2.5 with the data-free recipe</div>
+<div class="eyebrow">LTX-2.5, quantized without a single prompt</div>
 <div class="grid">
  <div class="card"><div class="k">Transformer file</div><div class="v">11.2 GiB</div><div class="d">NVFP4, from 39.1 GiB in bf16 (3.5× smaller). The INT4 file is 10.6 GiB</div></div>
  <div class="card"><div class="k">Transformer step, RTX PRO 6000</div><div class="v">1.83× faster</div><div class="d">475 ms vs 870 ms per step for bf16, 768×512, 121 frames</div></div>
@@ -165,23 +165,29 @@ excerpt: "diffuse-compressor gets a data-free SVDQuant path: 4-bit checkpoints f
 </div>
 
 <div class="verdict">
-<p><strong>In one paragraph.</strong> Lightricks publishes its own INT8 and NVFP4 transformers for LTX-2.5. Their INT8 stays closest to bf16. Ours are the fastest and the smallest, and at the same bit width our NVFP4 is 2.3 dB closer to bf16 than theirs. If matching bf16 output matters more to you than speed and memory, use their INT8.</p>
+<p><strong>In one paragraph.</strong> Lightricks publishes its own INT8 and NVFP4 transformers for LTX-2.5. With no calibration data at all, ours are the fastest and the smallest of the lot, and at the same 4-bit format our NVFP4 is 2.3 dB closer to bf16 than Lightricks'. Their INT8 is still the closest to bf16, at nearly twice the file size; if exact bf16 output matters more to you than speed and memory, use it.</p>
 </div>
 
-<h2 id="data-free">What PR #27 adds</h2>
-<p><a href="https://github.com/rootonchair/diffuse-compressor">diffuse-compressor</a> is a model-agnostic SVDQuant toolkit for diffusion transformers. Until now it needed calibration data: it ran the pipeline on a set of prompts, captured each layer's activations, and used them to pick smoothing scales and to weight the SVD. PR #27, open for review, adds a path that skips all of that. Exports keep the same Nunchaku format, so a data-free checkpoint loads exactly like a calibrated one.</p>
+<h2 id="data-free">One flag, no dataset</h2>
+<p>diffuse-compressor is a model-agnostic SVDQuant toolkit for diffusion transformers. Its calibrated path runs the full pipeline over a prompt set to pick smoothing scales and weight the SVD. The data-free path, introduced in the <a href="/2026-10-12-data-free-svdquant/">previous post</a> and now built in (<a href="https://github.com/rootonchair/diffuse-compressor/pull/27">#27</a>), gets there from the weights alone. What that buys you:</p>
 <ul>
-<li><strong>Weight-only smoothing.</strong> Without activations, smoothing falls back to scales computed from the weight itself, <code>s = 1 / absmax(W[:, j]) ** E</code>, instead of doing nothing. The low-rank branch becomes a plain SVD of the smoothed weight.</li>
-<li><strong>A smaller load.</strong> With <code>--data-free</code>, the scripts load only the denoiser (the <code>transformer</code> or <code>unet</code> subfolder). No text encoder, no VAE, no prompts, no sampling.</li>
+<li><strong>No data to collect.</strong> No prompt set, no captured activations, no guessing whether your calibration prompts match what users will type.</li>
+<li><strong>Only the transformer is loaded.</strong> No text encoder, no VAE, no sampling. For LTX-2.5 that leaves out a 22.3 GiB text encoder.</li>
+<li><strong>Any Diffusers model.</strong> The generic scripts find the linear layers on their own; there is nothing model-specific to write.</li>
+<li><strong>Nothing changes downstream.</strong> The export is the same Nunchaku format as a calibrated checkpoint and loads exactly like one.</li>
+</ul>
+<p>Under the hood:</p>
+<ul>
+<li><strong>Weight-only smoothing.</strong> Smoothing scales come from the weight itself, <code>s = 1 / absmax(W[:, j]) ** E</code>. The low-rank branch is a plain SVD of the smoothed weight.</li>
 <li><strong><code>--smooth-exponent E</code></strong> sets the smoothing strength from 0 (off) to 1 (flatten every input channel's weight span). The default is 0.5, or 0 with <code>--hadamard</code>.</li>
-<li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. It came in with PR #26 and is now wired into the generic text-to-image, FLUX.2 klein-9B, LTX-2.3 and generic text-to-video scripts. NVFP4 with <code>--hadamard</code> is rejected, because rotation made NVFP4 worse in the previous post.</li>
+<li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. It works in the generic text-to-image, FLUX.2 klein-9B, LTX-2.3 and generic text-to-video scripts. NVFP4 with <code>--hadamard</code> is rejected, because rotation made NVFP4 worse in the previous post.</li>
 <li><strong>Output names that don't collide.</strong> Data-free and rotated checkpoints get <code>-datafree</code> and <code>-hadamard</code> suffixes, so they never overwrite a calibrated file.</li>
-<li><strong>Lower memory in the PyTorch reference runtime.</strong> The <code>torch-dequant</code> activation fake-quant now runs in place, and FP4 in bounded chunks, so peak GPU memory stays flat.</li>
-<li><strong>Synthetic calibration for FLUX.2 klein-9B.</strong> <code>--synthetic-calibration</code> drives the transformer alone on synthetic denoising trajectories, so the full smoothing search and activation-weighted SVD run, still without a dataset.</li>
+<li><strong>Lean on memory.</strong> The pure-PyTorch <code>torch-dequant</code> runtime fake-quantizes activations in place, and FP4 in bounded chunks, so peak GPU memory stays flat.</li>
+<li><strong>Synthetic calibration for FLUX.2 klein-9B.</strong> Want the full smoothing search and activation-weighted SVD anyway? <code>--synthetic-calibration</code> drives the transformer alone on synthetic denoising trajectories, still without a dataset.</li>
 </ul>
 
-<h2 id="quantize">Quantizing a model with it</h2>
-<p>For any Diffusers text-to-image model, pick NVFP4 on Blackwell GPUs and INT4 with rotation elsewhere:</p>
+<h2 id="quantize">Quantize your own model</h2>
+<p>Point the generic script at any Diffusers text-to-image model. Pick NVFP4 for Blackwell GPUs and INT4 with rotation for everything else:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash"># Blackwell (RTX 50xx / RTX PRO 6000 / B200): nvfp4, rank 32
 python examples/text_to_image/quantize_hf.py black-forest-labs/FLUX.2-klein-4B \
     --precision nvfp4 --data-free
@@ -215,12 +221,12 @@ pipe = load_evaluation_pipeline(
 image = pipe("a red fox in fresh snow, golden hour", num_inference_steps=4).images[0]</code></pre></div>
 <p>Rotated (<code>-hadamard</code>) checkpoints need Nunchaku Lite's Hadamard quantize op, which is CUDA only, for fast inference. <code>torch-dequant</code> runs them without it.</p>
 
-<h2 id="why-4-bit">Test case: LTX-2.5</h2>
+<h2 id="why-4-bit">The stress test: LTX-2.5</h2>
 <p>LTX-2.5 distilled makes a 5-second, 768×512 clip with sound in 8 denoising steps. The pipeline around its 22B transformer is large too: a Gemma 4 12B text encoder (22.3 GiB in bf16), video and audio VAEs, a vocoder and a diffusion decoder that turns latents into frames. With every part in bf16 on one GPU, the pipeline peaks at 76.8 GB, just inside an 80 GB A100.</p>
 <p>The transformer is the largest piece and the one that runs 8 times per clip, so it is where 4 bits pay off twice: in memory and, with 4-bit tensor-core kernels, in time per step.</p>
 
 <h2 id="recipe">The recipe on LTX-2.5</h2>
-<p>The LTX-2.5 checkpoints use the recipe that PR #27 implements. They were not produced by the PR's scripts, which have no LTX-2.5 entry yet: they were exported through the data-free quantize-on-load path in Diffusers, with the same weight-only smoothing, plain SVD and Hadamard rotation. In PR #27's terms, the NVFP4 file corresponds to <code>--smooth-exponent 0</code> (not the 0.5 default) and the INT4 file to <code>--hadamard</code>.</p>
+<p>The LTX-2.5 checkpoints use exactly this recipe: weight-only smoothing, a plain SVD and, for INT4, the Hadamard rotation. In diffuse-compressor terms, the NVFP4 file is <code>--data-free --smooth-exponent 0</code> and the INT4 file is <code>--data-free --hadamard</code>. (The files themselves were exported through the same recipe's port to Diffusers' quantize-on-load.)</p>
 <p>The method is the one from the previous post: each linear layer's weight is split into a rank-32 low-rank branch kept in bf16, which carries the outliers that 4 bits represent poorly, and a 4-bit residual. Everything is computed from the weights alone. There is no calibration set, no captured activations and no per-model tuning: the same 1,344 linear layers of the transformer are selected automatically and quantized the same way.</p>
 <p>What changes is the 4-bit format, which follows the GPU:</p>
 <div class="tbl"><table><thead><tr><th>GPU</th><th>format</th><th>recipe</th><th class="n">file ↓</th></tr></thead><tbody>
@@ -423,7 +429,6 @@ for name, component in pipe.components.items():
 
 <h2 id="limitations">Limitations</h2>
 <ul>
-<li>PR #27 is still open. Its unit tests pass, but its own end-to-end GPU run against the previous post's PSNR and SSIM is not done yet, and it has no LTX-2.5 script; the LTX-2.5 numbers here come from the Diffusers export path described above.</li>
 <li>LTX-2.5 support is a preview. The checkpoints cover the distilled model only.</li>
 <li>NVFP4 runs only on Blackwell GPUs. On other CUDA GPUs, use the INT4 file.</li>
 <li>Loading the transformer reads the bf16 weights first (about 44 GB of CPU memory) before replacing them with the quantized ones, and converting the base model needs about 85 GB of CPU memory.</li>
