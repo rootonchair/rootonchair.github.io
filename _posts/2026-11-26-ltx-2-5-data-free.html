@@ -235,7 +235,7 @@ image = result.images[0]</code></pre></div>
 <p>The transformer is the largest piece and the one that runs 8 times per clip, so it is where 4 bits pay off twice: in memory and, with 4-bit tensor-core kernels, in time per step.</p>
 
 <h2 id="recipe">The recipe on LTX-2.5</h2>
-<p>The LTX-2.5 checkpoints use exactly this recipe: weight-only smoothing, a plain SVD and, for INT4, the Hadamard rotation. In diffuse-compressor terms, the NVFP4 file is a <code>data_free/</code> script with <code>--precision nvfp4 --smooth-exponent 0</code> and the INT4 file one with <code>--precision int4 --hadamard</code>. (The files themselves were exported through the same recipe's port to Diffusers' quantize-on-load.)</p>
+<p>The LTX-2.5 checkpoints use exactly this recipe: weight-only smoothing, a plain SVD and, for INT4, the Hadamard rotation. In diffuse-compressor terms, the NVFP4 file is a <code>data_free/</code> script with <code>--precision nvfp4 --smooth-exponent 0</code> and the INT4 file one with <code>--precision int4 --hadamard</code>, using the exact SVD (<code>--svd-backend full</code>). (The files themselves were exported through the same recipe's port to Diffusers' quantize-on-load.)</p>
 <p>Each linear layer's weight is split into a rank-32 low-rank branch kept in bf16, which carries the outliers that 4 bits represent poorly, and a 4-bit residual. The same 1,344 linear layers of the transformer are selected automatically and quantized the same way.</p>
 <div class="tbl"><table><thead><tr><th>GPU</th><th>format</th><th>recipe</th></tr></thead><tbody>
 <tr><td>Blackwell (tested: RTX PRO 6000)</td><td>NVFP4 weights and activations, rank 32</td><td>no smoothing, no rotation</td></tr>
@@ -454,7 +454,7 @@ for name, component in pipe.components.items():
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li>LTX-2.5 support is a preview. The checkpoints cover the distilled model only.</li>
-<li>The numbers on this page come from the Diffusers port of the recipe. diffuse-compressor's <code>data_free/</code> scripts are tested on CPU, including end to end on small FLUX.2 and LTX-2 models, but have not yet been run on full-size weights on a GPU.</li>
+<li>The numbers on this page come from the Diffusers port of the recipe. diffuse-compressor's <code>data_free/</code> scripts are tested on CPU, including end to end on small FLUX.2 and LTX-2 models, but have not yet been run on full-size weights on a GPU, and their exports have not yet been loaded in Nunchaku Lite.</li>
 <li>NVFP4 runs only on Blackwell GPUs. On other CUDA GPUs, use the INT4 file.</li>
 <li>Loading the transformer reads the bf16 weights first (about 44 GB of CPU memory) before replacing them with the quantized ones, and converting the base model needs about 85 GB of CPU memory.</li>
 <li>Untiled decoding is faster but needs about 13.5 GB more VRAM at 768×512×121. Tiled and untiled decodes differ from each other (about 30 dB PSNR), so compare outputs only between runs that decode the same way.</li>
