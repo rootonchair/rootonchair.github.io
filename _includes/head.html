@@ -113,6 +113,8 @@
       {%- else -%}
         {{ page.cover-img }}
       {%- endif -%}
+    {%- elsif page.feature-img -%}
+      {{ page.feature-img }}
     {%- elsif page.thumbnail-img -%}
       {{ page.thumbnail-img }}
     {%- elsif site.avatar -%}

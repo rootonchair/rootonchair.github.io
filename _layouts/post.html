@@ -39,6 +39,12 @@ layout: base
         </div>
       {% endif %}
 
+      {% if page.feature-img %}
+        <figure class="post-feature-figure">
+          <img src="{{ page.feature-img | relative_url }}" alt="{{ page.feature-img-alt | default: page.title | strip_html | escape }}" width="1600" height="800">
+        </figure>
+      {% endif %}
+
       <div class="blog-post">
         {{ content }}
       </div>
