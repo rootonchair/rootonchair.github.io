@@ -180,55 +180,47 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
 <li><strong>Weight-only smoothing.</strong> Smoothing scales come from the weight itself, <code>s = 1 / absmax(W[:, j]) ** E</code>. The low-rank branch is a plain SVD of the smoothed weight.</li>
 <li><strong><code>--smooth-exponent E</code></strong> sets the smoothing strength from 0 (off) to 1 (flatten every input channel's weight span). The default is 0.5, or 0 with <code>--hadamard</code>.</li>
 <li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. Every data-free script takes it; NVFP4 with <code>--hadamard</code> is rejected.</li>
-<li><strong>Synthetic calibration for FLUX.2 klein-9B.</strong> Want the full smoothing search and activation-weighted SVD without a dataset? The calibrated klein-9B script's <code>--synthetic-calibration</code> drives the transformer alone on synthetic denoising trajectories.</li>
 </ul>
 
 <h2 id="quantize">Quantize your own model</h2>
-<p>Data-free scripts live in each task's <code>data_free/</code> folder: dedicated ones for FLUX.2 klein 4B and 9B, and a generic <code>quantize_hf.py</code> for any other Diffusers model. Pick NVFP4 for Blackwell GPUs and INT4 with rotation for everything else:</p>
+<p>One script, <code>data_free/quantize_hf.py</code>, takes any Diffusers model id, finds its linear layers and quantizes them. Pick NVFP4 for Blackwell GPUs and INT4 with rotation for everything else:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash"># Blackwell (RTX 50xx / RTX PRO 6000 / B200): nvfp4, rank 32
-python examples/text_to_image/data_free/quantize_flux2_klein_4b.py --precision nvfp4
-# -> outputs/checkpoints/svdq-nvfp4_r32-flux2-klein-4b-datafree.safetensors
+python examples/text_to_image/data_free/quantize_hf.py black-forest-labs/FLUX.2-klein-4B \
+    --precision nvfp4
+# -> outputs/checkpoints/svdq-nvfp4_r32-flux-2-klein-4b-datafree.safetensors
 
 # A100 and older: int4 + Hadamard rotation (smoothing defaults to 0)
-python examples/text_to_image/data_free/quantize_flux2_klein_4b.py --precision int4 --hadamard
-# -> outputs/checkpoints/svdq-int4_r32-flux2-klein-4b-datafree-hadamard.safetensors
+python examples/text_to_image/data_free/quantize_hf.py black-forest-labs/FLUX.2-klein-4B \
+    --precision int4 --hadamard
+# -> outputs/checkpoints/svdq-int4_r32-flux-2-klein-4b-datafree-hadamard.safetensors
 
-# any other Diffusers text-to-image model
-python examples/text_to_image/data_free/quantize_hf.py MODEL_ID --precision nvfp4</code></pre></div>
-<p>Video works the same way, with dedicated scripts for LTX-2.3 and a generic one for other text-to-video models. For a model that does not fit on the GPU in bf16, <code>--offload-model</code> keeps it on the CPU and quantizes one layer at a time on the GPU:</p>
-<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash"># LTX-2.3 distilled: Blackwell, then A100 and older
-python examples/text_to_video/data_free/quantize_ltx2_3_distilled.py --precision nvfp4
-python examples/text_to_video/data_free/quantize_ltx2_3_distilled.py --precision int4 --hadamard
+# video models: the same script in the text_to_video folder
+python examples/text_to_video/data_free/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+    --precision nvfp4
 
 # too big for the GPU in bf16: keep it on the CPU, quantize layer by layer
-python examples/text_to_video/data_free/quantize_ltx2_3.py \
-    --precision nvfp4 --offload-model --compute-device cuda
+python examples/text_to_video/data_free/quantize_hf.py MODEL_ID \
+    --precision nvfp4 --offload-model --compute-device cuda</code></pre></div>
+<p>Add <code>--inspect-config</code> to list the layers that would be quantized without quantizing them, <code>--skip PATTERN</code> to keep matching layers in bf16, and <code>--rank N</code> to size the low-rank branch (default 32, a multiple of 16). The default SVD is randomized, so runs differ slightly; <code>--svd-backend full</code> is exact and reproducible. When sweeping <code>--smooth-exponent</code> or <code>--hadamard</code>, give each run its own <code>--cache-dir</code>. FLUX.2 klein and LTX-2.3 also have dedicated scripts in the same folders, which export the same layer layout as their calibrated counterparts.</p>
+<p>The checkpoint then loads into the model's ordinary Diffusers pipeline:</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">import torch
+from diffusers import Flux2KleinPipeline
+from nunchaku_lite import load_nunchaku_pipeline
 
-# any other Diffusers text-to-video model
-python examples/text_to_video/data_free/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Diffusers \
-    --precision nvfp4</code></pre></div>
-<p>Every data-free script takes <code>--inspect-config</code>, which lists the layers that would be quantized without quantizing them, and <code>--rank N</code> for the low-rank branch (default 32, a multiple of 16). The generic <code>quantize_hf.py</code> scripts also take <code>--skip PATTERN</code> to keep matching layers in bf16. The default SVD is randomized, so runs differ slightly; <code>--svd-backend full</code> is exact and reproducible. When sweeping <code>--smooth-exponent</code> or <code>--hadamard</code>, give each run its own <code>--cache-dir</code>.</p>
-<p>The checkpoint then loads like any other diffuse-compressor export:</p>
-<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">from diffuse_compressor.runtime import RuntimePipelineSpec, load_evaluation_pipeline
-
-pipe = load_evaluation_pipeline(
-    model_id="black-forest-labs/FLUX.2-klein-4B",
-    spec=RuntimePipelineSpec(
-        mode="quantized",
-        # or "torch-dequant" for a pure-PyTorch correctness check
-        runtime="nunchaku-lite",
-        nunchaku_lite_target="flux2",
-        checkpoint=(
-            "outputs/checkpoints/"
-            "svdq-nvfp4_r32-flux2-klein-4b-datafree.safetensors"
-        ),
-        precision="fp4",  # "int4" for an INT4 checkpoint
-        device="cuda",
+pipe = load_nunchaku_pipeline(
+    "black-forest-labs/FLUX.2-klein-4B",
+    pipeline_cls=Flux2KleinPipeline,
+    checkpoint=(
+        "outputs/checkpoints/"
+        "svdq-nvfp4_r32-flux-2-klein-4b-datafree.safetensors"
     ),
+    target="manifest",  # the generic layout written by quantize_hf.py
+    precision="fp4",  # "int4" for an INT4 checkpoint
+    torch_dtype=torch.bfloat16,
+    device="cuda",
 )
-result = pipe("a red fox in fresh snow, golden hour", num_inference_steps=4)
-image = result.images[0]</code></pre></div>
-<p>Rotated (<code>-hadamard</code>) checkpoints need Nunchaku Lite's Hadamard quantize op, which is CUDA only, for fast inference. <code>torch-dequant</code> runs them without it.</p>
+image = pipe("a red fox in fresh snow, golden hour", num_inference_steps=4).images[0]</code></pre></div>
+<p>Rotated (<code>-hadamard</code>) checkpoints need Nunchaku Lite's Hadamard quantize op, which is CUDA only.</p>
 
 <h2 id="why-4-bit">The stress test: LTX-2.5</h2>
 <p>LTX-2.5 distilled makes a 5-second, 768×512 clip with sound in 8 denoising steps. The pipeline around its 22B transformer is large too: a Gemma 4 12B text encoder, video and audio VAEs, a vocoder and a diffusion decoder that turns latents into frames. With every part in bf16 on one GPU, the pipeline peaks at 76.8 GB, just inside an 80 GB A100.</p>
