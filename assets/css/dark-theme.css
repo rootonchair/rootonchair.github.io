@@ -1,0 +1,151 @@
+/* Dark theme
+   Active when <html data-theme="dark"> is set by _includes/theme-init.html
+   (saved choice from the navbar toggle, or the OS preference when set to "system").
+   The theme's colours are CSS variables, so most of the work is redefining them;
+   the rest overrides colours that beautifuljekyll.css and pygment_highlights.css hard-code. */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --page-col: #131311;
+  --text-col: #e4e0d8;
+  --link-col: #e8925f;
+  --hover-col: #f2ad83;
+  --navbar-col: #1b1a17;
+  --navbar-text-col: #ebe7df;
+  --navbar-border-col: #2c2a26;
+  --footer-col: #1b1a17;
+  --footer-text-col: #a8a397;
+  --footer-link-col: #ebe7df;
+  --footer-hover-col: #e8925f;
+  --mid-col: #a8a397;
+
+  --dark-line: #2c2a26;
+  --dark-line-strong: #3d3a35;
+  --dark-panel: #1b1a17;
+  --dark-code-bg: #221f1c;
+}
+
+/* --- general --- */
+:root[data-theme="dark"] h1,
+:root[data-theme="dark"] h2,
+:root[data-theme="dark"] h3,
+:root[data-theme="dark"] h4,
+:root[data-theme="dark"] h5,
+:root[data-theme="dark"] h6 { color: #ebe7df; }
+:root[data-theme="dark"] ::selection { background: #4a2f20; color: #fff; }
+:root[data-theme="dark"] .jumbotron { background: var(--dark-panel); }
+:root[data-theme="dark"] .text-muted { color: var(--mid-col) !important; }
+:root[data-theme="dark"] hr { border-top-color: var(--dark-line-strong); }
+
+/* --- navbar --- */
+:root[data-theme="dark"] .navbar-custom .nav-item.dropdown .dropdown-menu { background: var(--navbar-col); border-color: var(--dark-line); }
+:root[data-theme="dark"] .navbar-custom .navbar-nav .dropdown-menu .dropdown-item { color: var(--navbar-text-col); }
+:root[data-theme="dark"] .navbar-custom .navbar-nav .dropdown-menu .dropdown-item:hover,
+:root[data-theme="dark"] .navbar-custom .navbar-nav .dropdown-menu .dropdown-item:focus { background: rgba(255, 255, 255, .06); }
+:root[data-theme="dark"] .navbar-custom .navbar-toggler[aria-expanded="true"] { background-color: rgba(255, 255, 255, .08); }
+
+/* --- post list, tags, pager --- */
+:root[data-theme="dark"] .post-preview { border-bottom-color: var(--dark-line); }
+:root[data-theme="dark"] .pagination .page-item .page-link { border-color: var(--dark-line-strong); }
+:root[data-theme="dark"] .pagination .page-item .page-link:hover,
+:root[data-theme="dark"] .pagination .page-item .page-link:focus { color: #131311; }
+
+/* --- post body --- */
+/* Third-party iframes (GitHub buttons) are light documents; matching their colour scheme
+   keeps them transparent instead of painted on an opaque white canvas. */
+:root[data-theme="dark"] #header-gh-btns iframe { color-scheme: light; }
+:root[data-theme="dark"] .blog-post .caption { color: var(--mid-col); }
+:root[data-theme="dark"] .blog-post blockquote { border-left-color: var(--dark-line-strong); }
+
+:root[data-theme="dark"] table tr { border-top-color: var(--dark-line-strong); }
+:root[data-theme="dark"] table tr:nth-child(2n) { background-color: var(--dark-panel); }
+:root[data-theme="dark"] table tr th,
+:root[data-theme="dark"] table tr td { border-color: var(--dark-line-strong); }
+
+:root[data-theme="dark"] code { color: #f0a58a; background-color: var(--dark-code-bg); }
+:root[data-theme="dark"] pre code { background-color: transparent; }
+:root[data-theme="dark"] .highlight > pre {
+  color: #e4e0d8;
+  background-image: linear-gradient(
+    rgba(255,255,255,0.03), rgba(255,255,255,0.03) 1.5em, rgba(255,255,255,0.015) 1.5em, rgba(255,255,255,0.015) 3em);
+  border-color: rgba(255, 255, 255, .08);
+  border-left-color: #5d5a54;
+}
+:root[data-theme="dark"] .highlight pre.lineno { color: rgba(255, 255, 255, .3); border-right-color: #5d5a54; }
+
+/* notification boxes */
+:root[data-theme="dark"] .box-note,
+:root[data-theme="dark"] .box-warning,
+:root[data-theme="dark"] .box-error,
+:root[data-theme="dark"] .box-success { border-color: var(--dark-line); }
+:root[data-theme="dark"] .box-note    { background-color: #1a222b; border-left-color: #4a9ad4; }
+:root[data-theme="dark"] .box-warning { background-color: #2b2614; border-left-color: #f1c40f; }
+:root[data-theme="dark"] .box-error   { background-color: #2e1a18; border-left-color: #e0574a; }
+:root[data-theme="dark"] .box-success { background-color: #16281b; border-left-color: #3cb371; }
+
+/* --- syntax highlighting (overrides pygment_highlights.css) --- */
+:root[data-theme="dark"] .highlight .c, :root[data-theme="dark"] .highlight .c1, :root[data-theme="dark"] .highlight .cm,
+:root[data-theme="dark"] .highlight .cs, :root[data-theme="dark"] .highlight .cp, :root[data-theme="dark"] .highlight .ch,
+:root[data-theme="dark"] .highlight .cpf { color: #8a857b; }
+:root[data-theme="dark"] .highlight .k, :root[data-theme="dark"] .highlight .kc, :root[data-theme="dark"] .highlight .kd,
+:root[data-theme="dark"] .highlight .kn, :root[data-theme="dark"] .highlight .kp, :root[data-theme="dark"] .highlight .kr,
+:root[data-theme="dark"] .highlight .kt, :root[data-theme="dark"] .highlight .o, :root[data-theme="dark"] .highlight .ow { color: #e8925f; }
+:root[data-theme="dark"] .highlight .s, :root[data-theme="dark"] .highlight .s1, :root[data-theme="dark"] .highlight .s2,
+:root[data-theme="dark"] .highlight .sb, :root[data-theme="dark"] .highlight .sc, :root[data-theme="dark"] .highlight .sd,
+:root[data-theme="dark"] .highlight .se, :root[data-theme="dark"] .highlight .sh, :root[data-theme="dark"] .highlight .si,
+:root[data-theme="dark"] .highlight .sx, :root[data-theme="dark"] .highlight .sr, :root[data-theme="dark"] .highlight .ss,
+:root[data-theme="dark"] .highlight .sa, :root[data-theme="dark"] .highlight .dl { color: #96c98a; }
+:root[data-theme="dark"] .highlight .m, :root[data-theme="dark"] .highlight .mf, :root[data-theme="dark"] .highlight .mh,
+:root[data-theme="dark"] .highlight .mi, :root[data-theme="dark"] .highlight .mo, :root[data-theme="dark"] .highlight .mb,
+:root[data-theme="dark"] .highlight .il { color: #7fb4dc; }
+:root[data-theme="dark"] .highlight .nf, :root[data-theme="dark"] .highlight .fm, :root[data-theme="dark"] .highlight .nc,
+:root[data-theme="dark"] .highlight .nd, :root[data-theme="dark"] .highlight .ne, :root[data-theme="dark"] .highlight .nn { color: #c3a1ec; }
+:root[data-theme="dark"] .highlight .nb, :root[data-theme="dark"] .highlight .bp, :root[data-theme="dark"] .highlight .na,
+:root[data-theme="dark"] .highlight .nt, :root[data-theme="dark"] .highlight .nv, :root[data-theme="dark"] .highlight .vc,
+:root[data-theme="dark"] .highlight .vg, :root[data-theme="dark"] .highlight .vi, :root[data-theme="dark"] .highlight .no { color: #7fb4dc; }
+:root[data-theme="dark"] .highlight .err { color: #ea7b6f; background-color: transparent; }
+:root[data-theme="dark"] .highlight .gd, :root[data-theme="dark"] .highlight .gd .x { color: #ea7b6f; background-color: #3a1e1b; }
+:root[data-theme="dark"] .highlight .gi, :root[data-theme="dark"] .highlight .gi .x { color: #74c08b; background-color: #1b2e20; }
+:root[data-theme="dark"] .highlight .gh, :root[data-theme="dark"] .highlight .gu, :root[data-theme="dark"] .highlight .go,
+:root[data-theme="dark"] .highlight .gp { color: #a8a397; }
+:root[data-theme="dark"] .highlight .w { color: #5d5a54; }
+
+/* --- search overlay --- */
+:root[data-theme="dark"] #nav-search-input { background: var(--dark-panel); color: #ebe7df; }
+:root[data-theme="dark"] #nav-search-input:focus { background: #23211d; box-shadow: 0 0.15rem 1rem rgba(232, 146, 95, .15); }
+:root[data-theme="dark"] #nav-search-input::placeholder { color: #7f7a70; }
+:root[data-theme="dark"] #nav-search-exit { color: #a8a397; }
+:root[data-theme="dark"] #nav-search-exit:hover { color: #fff; }
+
+/* --- posts written as raw HTML ---
+   These carry a scoped stylesheet built on --bg/--fg/--muted/--line/--panel/--accent/--syn-*
+   variables; remapping them on the post's wrapper makes the post follow the theme. */
+:root[data-theme="dark"] .blog-post > div[class] {
+  --bg: #131311;
+  --fg: #e4e0d8;
+  --muted: #a8a397;
+  --line: #34322d;
+  --panel: #1b1a17;
+  --accent: #e8925f;
+  --good: #74c08b;
+  --bad: #ea7b6f;
+  --syn-kw: #e8925f;
+  --syn-str: #96c98a;
+  --syn-com: #8a857b;
+  --syn-num: #7fb4dc;
+  --syn-fn: #c3a1ec;
+  --syn-var: #7fb4dc;
+}
+:root[data-theme="dark"] .blog-post > div[class] img { border-color: #34322d; }
+
+/* --- theme toggle (navbar) --- */
+#nav-theme-toggle .theme-icon { display: none; }
+:root[data-theme-pref="light"] #nav-theme-toggle .theme-icon-light,
+:root[data-theme-pref="dark"] #nav-theme-toggle .theme-icon-dark,
+:root[data-theme-pref="system"] #nav-theme-toggle .theme-icon-system { display: inline-block; }
+#nav-theme-text { display: none; }
+@media (max-width: 1199px) {
+  #nav-theme-toggle .theme-icon { display: none !important; }
+  #nav-theme-text { display: inline-block; }
+}
