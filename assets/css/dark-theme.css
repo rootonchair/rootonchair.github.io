@@ -137,6 +137,9 @@
   --syn-fn: #c3a1ec;
   --syn-var: #7fb4dc;
 }
+/* The site-wide `code` colour above would paint every untokenized word in these
+   posts' highlight.js blocks orange; let them use their own --fg / --syn-* colours. */
+:root[data-theme="dark"] .blog-post > div[class] code { color: inherit; background-color: transparent; }
 :root[data-theme="dark"] .blog-post > div[class] img { border-color: #34322d; }
 
 /* --- theme toggle (navbar) --- */

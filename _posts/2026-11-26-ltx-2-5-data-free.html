@@ -85,6 +85,7 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
 .ltx .hljs-title,.ltx .hljs-title.function_,.ltx .hljs-params{color:var(--syn-fn)}
 .ltx .hljs-variable,.ltx .hljs-attr,.ltx .hljs-template-variable{color:var(--syn-var)}
 .ltx .code .copy:hover,.ltx .code .copy:focus-visible{color:var(--accent);border-color:var(--accent)}
+.ltx .code pre{padding-top:38px}
 .ltx .toc{border:1px solid var(--line);background:var(--panel);padding:14px 18px;margin:16px 0 20px;max-width:72ch}
 .ltx .toc .eyebrow{margin-bottom:6px}
 .ltx .toc ol{margin:0;padding-left:22px;columns:2 220px;column-gap:28px}
@@ -199,13 +200,19 @@ python examples/text_to_image/quantize_hf.py black-forest-labs/FLUX.2-klein-4B \
     --precision int4 --data-free --hadamard
 # -> outputs/checkpoints/svdq-int4_r32-flux-2-klein-4b-datafree-hadamard.safetensors</code></pre></div>
 <p>Video works the same way, with a dedicated script for LTX-2.3 and a generic one for other text-to-video models. For a model that does not fit on the GPU in bf16, <code>--offload-model</code> keeps it on the CPU and quantizes one layer at a time on the GPU:</p>
-<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">python examples/text_to_video/quantize_ltx2_3_distilled.py --precision nvfp4 --data-free
-python examples/text_to_video/quantize_ltx2_3_distilled.py --precision int4 --data-free --hadamard
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash"># LTX-2.3 distilled: Blackwell, then A100 and older
+python examples/text_to_video/quantize_ltx2_3_distilled.py \
+    --precision nvfp4 --data-free
+python examples/text_to_video/quantize_ltx2_3_distilled.py \
+    --precision int4 --data-free --hadamard
 
-python examples/text_to_video/quantize_ltx2_3.py --precision nvfp4 --data-free \
-    --offload-model --compute-device cuda
+# too big for the GPU in bf16: keep it on the CPU, quantize layer by layer
+python examples/text_to_video/quantize_ltx2_3.py \
+    --precision nvfp4 --data-free --offload-model --compute-device cuda
 
-python examples/text_to_video/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Diffusers --precision nvfp4 --data-free</code></pre></div>
+# any other Diffusers text-to-video model
+python examples/text_to_video/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Diffusers \
+    --precision nvfp4 --data-free</code></pre></div>
 <p>Other useful options are <code>--rank N</code> for the low-rank branch (default 32), <code>--skip PATTERN</code> to keep matching layers in bf16, and <code>--inspect-config</code> to list the layers that would be quantized without quantizing them. Calibrated and data-free runs share a cache directory by default, so pass a separate <code>--cache-dir</code>, or <code>--cache-mode disabled</code>, when switching between them or changing <code>--smooth-exponent</code> or <code>--hadamard</code>.</p>
 <p>The checkpoint then loads like any other diffuse-compressor export:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">from diffuse_compressor.runtime import RuntimePipelineSpec, load_evaluation_pipeline
@@ -214,12 +221,17 @@ pipe = load_evaluation_pipeline(
     model_id="black-forest-labs/FLUX.2-klein-4B",
     spec=RuntimePipelineSpec(
         mode="quantized",
-        runtime="nunchaku-lite",  # or "torch-dequant" for a pure-PyTorch correctness check
-        checkpoint="outputs/checkpoints/svdq-nvfp4_r32-flux-2-klein-4b-datafree.safetensors",
+        # or "torch-dequant" for a pure-PyTorch correctness check
+        runtime="nunchaku-lite",
+        checkpoint=(
+            "outputs/checkpoints/"
+            "svdq-nvfp4_r32-flux-2-klein-4b-datafree.safetensors"
+        ),
         device="cuda",
     ),
 )
-image = pipe("a red fox in fresh snow, golden hour", num_inference_steps=4).images[0]</code></pre></div>
+result = pipe("a red fox in fresh snow, golden hour", num_inference_steps=4)
+image = result.images[0]</code></pre></div>
 <p>Rotated (<code>-hadamard</code>) checkpoints need Nunchaku Lite's Hadamard quantize op, which is CUDA only, for fast inference. <code>torch-dequant</code> runs them without it.</p>
 
 <h2 id="why-4-bit">The stress test: LTX-2.5</h2>
@@ -306,8 +318,10 @@ image = pipe("a red fox in fresh snow, golden hour", num_inference_steps=4).imag
 
 <h2 id="try-it">Run the LTX-2.5 files</h2>
 <p>Nunchaku Lite 0.5.1 is on PyPI (release notes: <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.5.0">0.5.0</a>, <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.5.1">0.5.1</a>). LTX-2.5 needs Diffusers 0.43 or newer, and the decoder speed-up needs the v3 kernels, which download from the Hugging Face Hub on first use.</p>
-<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">pip install nunchaku-lite                # CUDA kernels download from the Hugging Face Hub
-pip install "nunchaku-lite[bnb]"         # optional: 8-bit / NF4 text encoder</code></pre></div>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash"># CUDA kernels download from the Hugging Face Hub on first use
+pip install nunchaku-lite
+# optional: 8-bit / NF4 text encoder
+pip install "nunchaku-lite[bnb]"</code></pre></div>
 <p>The two checkpoints are in <a href="https://huggingface.co/rootonchair/nunchaku-lite-ltx-2.5-distilled"><code>rootonchair/nunchaku-lite-ltx-2.5-distilled</code></a>: <code>svdq-fp4_r32-ltx-2.5-distilled.safetensors</code> for Blackwell and <code>svdq-int4_r32-ltx-2.5-distilled.safetensors</code> for other CUDA GPUs. They are derivatives of LTX-2.5 under Lightricks' LTX-2.x Community License, which has its own terms, including for commercial use and for labeling generated content.</p>
 <h3>Convert the base model once</h3>
 <p>The repo holds only the transformer. The text encoder, VAEs, vocoder and diffusion decoder come from the base model in the Diffusers folder layout, and Lightricks ships LTX-2.5 as single files. Accept the license of the gated <code>Lightricks/LTX-2.5</code> repo, log in, and convert with the script in the Nunchaku Lite repository. It downloads 72 GB.</p>
@@ -323,7 +337,12 @@ from transformers import AutoModelForImageTextToText, AutoTokenizer
 
 import diffusers
 import diffusers.pipelines.ltx2 as ltx2
-from diffusers import FlowMatchEulerDiscreteScheduler, LTX2Guidance, LTX2VideoTransformer3DModel, LTX25AutoBlocks
+from diffusers import (
+    FlowMatchEulerDiscreteScheduler,
+    LTX2Guidance,
+    LTX2VideoTransformer3DModel,
+    LTX25AutoBlocks,
+)
 from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES
 from diffusers.utils import encode_video
 
@@ -332,14 +351,19 @@ from nunchaku_lite.adapters.ltx2_decoder import optimize_ltx2_diffusion_decoder
 
 model_dir = "ltx-2.5-distilled-diffusers"  # from tools/convert_ltx25_distilled.py
 precision = "fp4"  # "fp4" on Blackwell, "int4" elsewhere
-checkpoint = f"rootonchair/nunchaku-lite-ltx-2.5-distilled/svdq-{precision}_r32-ltx-2.5-distilled.safetensors"
+checkpoint = (
+    "rootonchair/nunchaku-lite-ltx-2.5-distilled/"
+    f"svdq-{precision}_r32-ltx-2.5-distilled.safetensors"
+)
 device = "cuda"
 
 # 1. quantized transformer
 transformer = LTX2VideoTransformer3DModel.from_pretrained(
     model_dir, subfolder="transformer", torch_dtype=torch.bfloat16
 )
-patch_transformer(transformer, checkpoint, target="ltx2", precision=precision, device=device)
+patch_transformer(
+    transformer, checkpoint, target="ltx2", precision=precision, device=device
+)
 
 
 # 2. the other components, bf16
@@ -350,19 +374,32 @@ def load_component(name):
     return cls.from_pretrained(path, torch_dtype=torch.bfloat16)
 
 
-guidance = dict(guidance_scale=1.0, stg_scale=0.0, modality_scale=1.0, guidance_rescale=0.0,
-                spatio_temporal_guidance_blocks=None)  # distilled model: no guidance
+# distilled model: no guidance
+guidance = dict(
+    guidance_scale=1.0,
+    stg_scale=0.0,
+    modality_scale=1.0,
+    guidance_rescale=0.0,
+    spatio_temporal_guidance_blocks=None,
+)
 components = {
     "transformer": transformer,
     "text_encoder": AutoModelForImageTextToText.from_pretrained(
         os.path.join(model_dir, "text_encoder"), torch_dtype=torch.bfloat16
     ),
-    "tokenizer": AutoTokenizer.from_pretrained(os.path.join(model_dir, "tokenizer")),
-    "scheduler": FlowMatchEulerDiscreteScheduler.from_pretrained(os.path.join(model_dir, "scheduler")),
+    "tokenizer": AutoTokenizer.from_pretrained(
+        os.path.join(model_dir, "tokenizer")
+    ),
+    "scheduler": FlowMatchEulerDiscreteScheduler.from_pretrained(
+        os.path.join(model_dir, "scheduler")
+    ),
     "guider": LTX2Guidance(**guidance),
     "audio_guider": LTX2Guidance(**guidance),
-    **{name: load_component(name) for name in
-       ("connectors", "vae", "audio_vae", "vocoder", "diffusion_decoder", "duration_head")},
+    **{
+        name: load_component(name)
+        for name in ("connectors", "vae", "audio_vae", "vocoder",
+                     "diffusion_decoder", "duration_head")
+    },
 }
 
 # 3. pipeline, all on the GPU
@@ -379,7 +416,10 @@ pipe.diffusion_decoder.disable_tiling()
 # 5. generate
 steps = 8
 state = pipe(
-    prompt="A golden retriever runs through a sunlit meadow of tall grass, ears flapping, birds chirping.",
+    prompt=(
+        "A golden retriever runs through a sunlit meadow of tall grass, "
+        "ears flapping, birds chirping."
+    ),
     width=768,
     height=512,
     num_frames=121,
@@ -408,7 +448,10 @@ encode_video(
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">from nunchaku_lite.text_encoders import load_text_encoder_bnb
 
 components["text_encoder"] = load_text_encoder_bnb(
-    AutoModelForImageTextToText, os.path.join(model_dir, "text_encoder"), quantization="nf4", device=device
+    AutoModelForImageTextToText,
+    os.path.join(model_dir, "text_encoder"),
+    quantization="nf4",
+    device=device,
 )  # or quantization="int8"
 
 # step 3: move everything else
