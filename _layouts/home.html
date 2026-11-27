@@ -36,6 +36,12 @@ layout: page
       {% endif %}
       {% endif %}
 
+      {% if post.feature-img %}
+      <a class="post-feature" href="{{ post.url | absolute_url }}" tabindex="-1" aria-hidden="true">
+        <img src="{{ post.feature-img | relative_url }}" alt="" loading="lazy" width="1600" height="800">
+      </a>
+      {% endif %}
+
       <a href="{{ post.url | absolute_url }}">
         <h2 class="post-title">{{ post.title | strip_html }}</h2>
 
