@@ -2,6 +2,7 @@
 layout: post
 title: Preliminary for Consistency Models
 subtitle: Break down the common terminology encountered in Consistency Models
+thumbnail-img: /assets/img/thumbs/consistency-models.jpg
 gh-repo: rootonchair/rootonchair.github.io
 gh-badge: [follow]
 tags: [en, stable-diffusion]
