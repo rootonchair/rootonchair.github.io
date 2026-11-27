@@ -163,28 +163,23 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
  <div class="card"><div class="k">Transformer file</div><div class="v">11.2 GiB</div><div class="d">NVFP4, from 39.1 GiB in bf16 (3.5× smaller). The INT4 file is 10.6 GiB</div></div>
  <div class="card"><div class="k">Transformer step, RTX PRO 6000</div><div class="v">1.83× faster</div><div class="d">475 ms vs 870 ms per step for bf16, 768×512, 121 frames</div></div>
  <div class="card"><div class="k">vs Lightricks' NVFP4</div><div class="v">+2.3 dB</div><div class="d">PSNR <span class="dir">↑</span> 21.12 vs 18.86 dB against bf16 at the same 4-bit format, in Diffusers</div></div>
- <div class="card"><div class="k">Full clip, RTX PRO 6000</div><div class="v">6.2 s</div><div class="d">5-second 768×512 clip with audio: NVFP4 + fused decoder, vs 9.4 s for bf16 with the same decoder</div></div>
+ <div class="card"><div class="k">Full clip, RTX PRO 6000</div><div class="v">6.2 s</div><div class="d">5-second 768×512 clip with audio, NVFP4 + fused decoder</div></div>
 </div>
 
 <div class="verdict">
-<p><strong>In one paragraph.</strong> Lightricks publishes its own INT8 and NVFP4 transformers for LTX-2.5. With no calibration data at all, ours are the fastest and the smallest of the lot, and at the same 4-bit format our NVFP4 is 2.3 dB closer to bf16 than Lightricks'. Their INT8 is still the closest to bf16, at nearly twice the file size; if exact bf16 output matters more to you than speed and memory, use it.</p>
+<p><strong>In one paragraph.</strong> With no calibration data at all, ours are the fastest and smallest of the files we compared, and the closest to bf16 at 4 bits. Lightricks' INT8 stays closest to bf16 overall, at nearly twice the file size; if exact bf16 output matters more to you than speed and memory, use it.</p>
 </div>
 
 <h2 id="data-free">One flag, no dataset</h2>
-<p>diffuse-compressor is a model-agnostic SVDQuant toolkit for diffusion transformers. Its calibrated path runs the full pipeline over a prompt set to pick smoothing scales and weight the SVD. The data-free path, introduced in the <a href="/2026-10-12-data-free-svdquant/">previous post</a> and now built in (<a href="https://github.com/rootonchair/diffuse-compressor/pull/27">#27</a>), gets there from the weights alone. What that buys you:</p>
+<p>diffuse-compressor is a model-agnostic SVDQuant toolkit for diffusion transformers. Its calibrated path runs the full pipeline over a prompt set to pick smoothing scales and weight the SVD. The data-free path, introduced in the <a href="/2026-10-12-data-free-svdquant/">previous post</a> and now built in, gets there from the weights alone. What that buys you:</p>
 <ul>
 <li><strong>No data to collect.</strong> No prompt set, no captured activations, no guessing whether your calibration prompts match what users will type.</li>
-<li><strong>Only the transformer is loaded.</strong> No text encoder, no VAE, no sampling. For LTX-2.5 that leaves out a 22.3 GiB text encoder.</li>
+<li><strong>Only the transformer is loaded.</strong> No text encoder, no VAE, no sampling.</li>
 <li><strong>Any Diffusers model.</strong> The generic scripts find the linear layers on their own; there is nothing model-specific to write.</li>
 <li><strong>Nothing changes downstream.</strong> The export is the same Nunchaku format as a calibrated checkpoint and loads exactly like one.</li>
-</ul>
-<p>Under the hood:</p>
-<ul>
 <li><strong>Weight-only smoothing.</strong> Smoothing scales come from the weight itself, <code>s = 1 / absmax(W[:, j]) ** E</code>. The low-rank branch is a plain SVD of the smoothed weight.</li>
 <li><strong><code>--smooth-exponent E</code></strong> sets the smoothing strength from 0 (off) to 1 (flatten every input channel's weight span). The default is 0.5, or 0 with <code>--hadamard</code>.</li>
-<li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. It works in the generic text-to-image, FLUX.2 klein-9B, LTX-2.3 and generic text-to-video scripts. NVFP4 with <code>--hadamard</code> is rejected, because rotation made NVFP4 worse in the previous post.</li>
-<li><strong>Output names that don't collide.</strong> Data-free and rotated checkpoints get <code>datafree</code> and <code>hadamard</code> markers in their default names, so they never overwrite a calibrated file.</li>
-<li><strong>Lean on memory.</strong> When the pure-PyTorch <code>torch-dequant</code> runtime fake-quantizes activations, it does so in place, and FP4 in bounded chunks, so peak GPU memory stays flat.</li>
+<li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. It works in the generic text-to-image, FLUX.2 klein-9B, LTX-2.3 and generic text-to-video scripts; NVFP4 with <code>--hadamard</code> is rejected.</li>
 <li><strong>Synthetic calibration for FLUX.2 klein-9B.</strong> Want the full smoothing search and activation-weighted SVD anyway? <code>--synthetic-calibration</code> drives the transformer alone on synthetic denoising trajectories, still without a dataset.</li>
 </ul>
 
@@ -213,7 +208,7 @@ python examples/text_to_video/quantize_ltx2_3.py \
 # any other Diffusers text-to-video model
 python examples/text_to_video/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Diffusers \
     --precision nvfp4 --data-free</code></pre></div>
-<p>Every script takes <code>--inspect-config</code>, which lists the layers that would be quantized without quantizing them. The generic <code>quantize_hf.py</code> scripts also take <code>--rank N</code> for the low-rank branch (default 32) and <code>--skip PATTERN</code> to keep matching layers in bf16. Data-free runs keep their own cache, apart from calibrated ones. When comparing <code>--smooth-exponent</code> or <code>--hadamard</code> settings, give each run its own <code>--cache-dir</code> (or use <code>--cache-mode disabled</code>), because runs that share a folder overwrite each other's resume state.</p>
+<p>Every script takes <code>--inspect-config</code>, which lists the layers that would be quantized without quantizing them. The generic <code>quantize_hf.py</code> scripts also take <code>--rank N</code> for the low-rank branch (default 32) and <code>--skip PATTERN</code> to keep matching layers in bf16. When sweeping <code>--smooth-exponent</code> or <code>--hadamard</code>, give each run its own <code>--cache-dir</code>.</p>
 <p>The checkpoint then loads like any other diffuse-compressor export:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">from diffuse_compressor.runtime import RuntimePipelineSpec, load_evaluation_pipeline
 
@@ -237,18 +232,17 @@ image = result.images[0]</code></pre></div>
 <p>Rotated (<code>-hadamard</code>) checkpoints need Nunchaku Lite's Hadamard quantize op, which is CUDA only, for fast inference. <code>torch-dequant</code> runs them without it.</p>
 
 <h2 id="why-4-bit">The stress test: LTX-2.5</h2>
-<p>LTX-2.5 distilled makes a 5-second, 768×512 clip with sound in 8 denoising steps. The pipeline around its 22B transformer is large too: a Gemma 4 12B text encoder (22.3 GiB in bf16), video and audio VAEs, a vocoder and a diffusion decoder that turns latents into frames. With every part in bf16 on one GPU, the pipeline peaks at 76.8 GB, just inside an 80 GB A100.</p>
+<p>LTX-2.5 distilled makes a 5-second, 768×512 clip with sound in 8 denoising steps. The pipeline around its 22B transformer is large too: a Gemma 4 12B text encoder, video and audio VAEs, a vocoder and a diffusion decoder that turns latents into frames. With every part in bf16 on one GPU, the pipeline peaks at 76.8 GB, just inside an 80 GB A100.</p>
 <p>The transformer is the largest piece and the one that runs 8 times per clip, so it is where 4 bits pay off twice: in memory and, with 4-bit tensor-core kernels, in time per step.</p>
 
 <h2 id="recipe">The recipe on LTX-2.5</h2>
 <p>The LTX-2.5 checkpoints use exactly this recipe: weight-only smoothing, a plain SVD and, for INT4, the Hadamard rotation. In diffuse-compressor terms, the NVFP4 file is <code>--data-free --smooth-exponent 0</code> and the INT4 file is <code>--data-free --hadamard</code>. (The files themselves were exported through the same recipe's port to Diffusers' quantize-on-load.)</p>
-<p>The method is the one from the previous post: each linear layer's weight is split into a rank-32 low-rank branch kept in bf16, which carries the outliers that 4 bits represent poorly, and a 4-bit residual. Everything is computed from the weights alone. There is no calibration set, no captured activations and no per-model tuning: the same 1,344 linear layers of the transformer are selected automatically and quantized the same way.</p>
-<p>What changes is the 4-bit format, which follows the GPU:</p>
-<div class="tbl"><table><thead><tr><th>GPU</th><th>format</th><th>recipe</th><th class="n">file ↓</th></tr></thead><tbody>
-<tr><td>Blackwell (tested: RTX PRO 6000)</td><td>NVFP4 weights and activations, rank 32</td><td>no smoothing, no rotation</td><td class="n">11.2 GiB</td></tr>
-<tr><td>other CUDA GPUs (tested: A100, L40S)</td><td>INT4 weights and activations, rank 32</td><td>smoothing exponent 0, Hadamard rotation on the input of all 1,344 quantized layers</td><td class="n">10.6 GiB</td></tr>
+<p>Each linear layer's weight is split into a rank-32 low-rank branch kept in bf16, which carries the outliers that 4 bits represent poorly, and a 4-bit residual. The same 1,344 linear layers of the transformer are selected automatically and quantized the same way.</p>
+<div class="tbl"><table><thead><tr><th>GPU</th><th>format</th><th>recipe</th></tr></thead><tbody>
+<tr><td>Blackwell (tested: RTX PRO 6000)</td><td>NVFP4 weights and activations, rank 32</td><td>no smoothing, no rotation</td></tr>
+<tr><td>other CUDA GPUs (tested: A100, L40S)</td><td>INT4 weights and activations, rank 32</td><td>smoothing exponent 0, Hadamard rotation</td></tr>
 </tbody></table></div>
-<p>The rotation mixes each layer's input channels with a Hadamard transform before quantizing, which spreads outliers across channels so that the INT4 grid wastes less of its range on them. It is stored in the checkpoint and applied automatically at load time. On FLUX.2-klein, rotation improved INT4 by about 1.7 dB of per-layer output SQNR and made NVFP4 worse, which is why only the INT4 file uses it. That comparison was not repeated on LTX-2.5.</p>
+<p>The rotation spreads outliers across input channels, so the INT4 grid wastes less of its range on them; it is stored in the checkpoint and applied at load time. On FLUX.2-klein it improved INT4 by about 1.7 dB of per-layer output SQNR and made NVFP4 worse, which is why only the INT4 file uses it. That comparison was not repeated on LTX-2.5.</p>
 
 <h2 id="results">Results against bf16 and Lightricks' files</h2>
 <p>Every row below runs in the same Diffusers pipeline with the same default (tiled) decoder: 6 prompts with people, 768×512, 121 frames, 8 steps. Lightricks' files ship in ComfyUI format, so they run here through ComfyUI's <code>comfy-kitchen</code> kernels inside the Diffusers pipeline; inside ComfyUI they may be faster or slower.</p>
@@ -260,21 +254,19 @@ image = result.images[0]</code></pre></div>
 <tr><td>Lightricks NVFP4</td><td class="n">17.4 GiB</td><td class="n">786 ms</td><td class="n">10.2</td><td class="n">55.2 GB</td><td class="n">18.86 dB</td><td class="n">0.671</td></tr>
 </tbody></table></div>
 <h3>Other GPUs: A100 80GB</h3>
-<p>NVFP4 needs Blackwell, so on an A100 the choice is between bf16, our INT4 and Lightricks' INT8.</p>
+<p>On the A100 the choice is bf16, our INT4 or Lightricks' INT8.</p>
 <div class="tbl"><table><thead><tr><th>transformer</th><th class="n">file ↓</th><th class="n">s/clip ↓</th><th class="n">peak VRAM ↓</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th></tr></thead><tbody>
 <tr><td>bf16</td><td class="n">39.1 GiB</td><td class="n">18.5</td><td class="n">76.8 GB</td><td class="n">—</td><td class="n">—</td></tr>
 <tr><td><b>Nunchaku Lite INT4 r32 + rotation</b></td><td class="n good">10.6 GiB</td><td class="n good">15.3</td><td class="n good">52.1 GB</td><td class="n">17.15 dB</td><td class="n">0.659</td></tr>
 <tr><td>Lightricks INT8</td><td class="n">20.0 GiB</td><td class="n">20.7</td><td class="n">57.7 GB</td><td class="n good">21.67 dB</td><td class="n good">0.792</td></tr>
 </tbody></table></div>
-<p>Reading the two tables together:</p>
 <ul>
-<li><b>Fastest.</b> On the RTX PRO 6000 our transformer step is 1.83× faster than bf16, 1.39× faster than Lightricks' INT8 and 1.65× faster than Lightricks' NVFP4. On the A100 our INT4 file is the only option faster than bf16 (15.3 against 18.5 s per clip); Lightricks' INT8 is slower than bf16 there.</li>
-<li><b>Smallest.</b> 10.6 to 11.2 GiB against 17.4 to 20.0 GiB, and 2.6 to 5.6 GB lower peak VRAM than Lightricks' files.</li>
-<li><b>Better at 4 bits.</b> At the same NVFP4 format, ours is 2.3 dB closer to bf16 than Lightricks' (21.12 against 18.86 dB). The bf16 low-rank branch is the difference: it keeps the weight outliers out of the 4-bit grid.</li>
-<li><b>Lightricks' INT8 is closest to bf16</b>, by about 5 dB on Blackwell (26.09 against 21.12) and 4.5 dB on the A100 (21.67 against 17.15). With twice the bits per weight, that is expected.</li>
+<li><b>Faster than bf16 on both GPUs.</b> On the A100, ours is the only option that is: Lightricks' INT8 is slower than bf16 there.</li>
+<li><b>Better at 4 bits.</b> At the same NVFP4 format, ours is 2.3 dB closer to bf16 than Lightricks'. The bf16 low-rank branch is the difference: it keeps the weight outliers out of the 4-bit grid.</li>
+<li><b>Lightricks' INT8 is closest to bf16</b> on both GPUs. With twice the bits per weight, that is expected.</li>
 </ul>
-<p>A lower PSNR means the video differs more from the bf16 video for the same seed. It does not have to mean the video looks worse: a distilled 8-step model turns small numerical differences into a slightly different pose or camera path, and PSNR punishes that as much as it punishes blur. Watch the comparisons below: five of the six prompts, on both GPUs.</p>
-<p>One more caveat on precision: our quantized path is not bit-reproducible from run to run. Mean PSNR moves by about 0.3 dB between runs, and on the A100, two runs of the same INT4 file matched each other at only 22.4 dB PSNR. Treat differences of a few tenths of a dB as noise.</p>
+<p>A lower PSNR does not have to mean the video looks worse: a distilled 8-step model turns small numerical differences into a slightly different pose or camera path, and PSNR punishes that as much as it punishes blur. Watch the comparisons below: five of the six prompts, on both GPUs.</p>
+<p>Our quantized path is also not bit-reproducible: mean PSNR moves by about 0.3 dB between runs, so treat differences of a few tenths of a dB as noise.</p>
 
 <div class="vp" data-set="compare"></div>
 
@@ -287,7 +279,7 @@ image = result.images[0]</code></pre></div>
 <li>residual add, RMSNorm and modulation in one kernel,</li>
 <li>SiLU gating.</li>
 </ul>
-<p>Attention stays on NATTEN: its default tiles were the fastest we tried, and there was no faster attention backend for the RTX PRO 6000's architecture. The decoder kernels work with any transformer; the bf16 numbers below use them too.</p>
+<p>Attention stays on NATTEN. The decoder kernels work with any transformer; the bf16 numbers below use them too.</p>
 <div class="tbl"><table><thead><tr><th>decode of 768×512×121, RTX PRO 6000</th><th class="n">time ↓</th></tr></thead><tbody>
 <tr><td>Diffusers default (tiled)</td><td class="n">3.24 s</td></tr>
 <tr><td>untiled</td><td class="n">2.77 s</td></tr>
@@ -296,16 +288,16 @@ image = result.images[0]</code></pre></div>
 <p>The fused decoder matches the unfused one to 56.6 dB PSNR (largest pixel difference 7/255), the difference that reordering floating-point reductions leaves. End to end, a full NVFP4 clip goes from 8.0 to 6.2 s (55.2 GB peak) and a bf16 clip from 10.9 to 9.4 s.</p>
 
 <h2 id="text-encoder">Lower VRAM: the text encoder</h2>
-<p>Once the transformer is 11 GiB, the largest component left is the Gemma 4 12B text encoder at 22.3 GiB. Nunchaku Lite 0.5.1 adds <code>load_text_encoder_bnb</code>, which loads it with bitsandbytes 8-bit or NF4 weights straight onto the GPU; since 0.6.0, bitsandbytes comes with Nunchaku Lite on Linux and Windows. RTX PRO 6000, NVFP4 transformer, fused decoder, everything on the GPU:</p>
+<p>Once the transformer is 11 GiB, the largest component left is the Gemma 4 12B text encoder at 22.3 GiB. Nunchaku Lite's <code>load_text_encoder_bnb</code> loads it with bitsandbytes 8-bit or NF4 weights straight onto the GPU. RTX PRO 6000, NVFP4 transformer, fused decoder, everything on the GPU:</p>
 <div class="tbl"><table><thead><tr><th>text encoder</th><th class="n">size ↓</th><th class="n">hidden-state error vs bf16 ↓</th><th class="n">peak VRAM ↓</th><th class="n">s/clip ↓</th></tr></thead><tbody>
 <tr><td>bf16</td><td class="n">22.3 GiB</td><td class="n">—</td><td class="n">55.2 GB</td><td class="n good">6.2</td></tr>
 <tr><td>bitsandbytes 8-bit</td><td class="n">12.1 GiB</td><td class="n">1.1%</td><td class="n">46.4 GB</td><td class="n">6.4</td></tr>
 <tr><td>bitsandbytes NF4</td><td class="n good">7.0 GiB</td><td class="n">2.9%</td><td class="n good">41.9 GB</td><td class="n">7.0</td></tr>
 </tbody></table></div>
-<p>With NF4 the whole pipeline peaks at 41.9 GB, down from 76.8 GB for the all-bf16 pipeline. Clip-level PSNR cannot rank the three encoders: the spread between prompts (2 to 5 dB) is larger than the differences between them, so compare a few videos for your own prompts. We also built a data-free W4A16 encoder of our own (7.7 GiB, 3.2% error). It did no better than NF4, so 0.5.1 removed it in favour of bitsandbytes.</p>
+<p>With NF4 the whole pipeline peaks at 41.9 GB, down from 76.8 GB for the all-bf16 pipeline. Clip-level PSNR cannot rank the three encoders: the spread between prompts (2 to 5 dB) is larger than the differences between them, so compare a few videos for your own prompts.</p>
 
 <h2 id="ltx-core">In Lightricks' own code</h2>
-<p>Diffusers is one way to run LTX-2.5; Lightricks' own <a href="https://github.com/Lightricks/LTX-2"><code>ltx-core</code> / <code>ltx-pipelines</code></a> is the other. Nunchaku Lite <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.6.0">0.6.0</a> runs our transformers there too, with no Diffusers involved, through <code>nunchaku_lite.integrations.ltx_core</code>. The checkpoints for it, in Lightricks' file layout, are in <a href="https://huggingface.co/rootonchair/nunchaku-lite-ltx-2.5-distilled-native"><code>rootonchair/nunchaku-lite-ltx-2.5-distilled-native</code></a>: our quantized layers spliced into Lightricks' own bf16 transformer file, every other tensor byte-identical. They load through an ltx-core <code>QuantizationPolicy</code>, the same mechanism as Lightricks' <code>nvfp4-prequant</code>. Lightricks' loader, its key checks, streaming and offloading then work as they do for any checkpoint.</p>
+<p>Diffusers is one way to run LTX-2.5; Lightricks' own <a href="https://github.com/Lightricks/LTX-2"><code>ltx-core</code> / <code>ltx-pipelines</code></a> is the other. Nunchaku Lite <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.6.0">0.6.0</a> runs our transformers there too, with no Diffusers involved, through <code>nunchaku_lite.integrations.ltx_core</code>. The checkpoints for it are in <a href="https://huggingface.co/rootonchair/nunchaku-lite-ltx-2.5-distilled-native"><code>rootonchair/nunchaku-lite-ltx-2.5-distilled-native</code></a>. They keep Lightricks' file layout and load through ltx-core's own <code>QuantizationPolicy</code>, so its loader, streaming and offloading work unchanged.</p>
 <p>Lightricks' <code>DistilledPipeline</code>, 768×512, 121 frames, 16 prompts, each clip scored against the bf16 clip of the same seed in the same pipeline:</p>
 <div class="tbl"><table><thead><tr><th>transformer</th><th class="n">PSNR ↑</th><th class="n">SSIM ↑</th><th class="n">transformer s/clip ↓</th><th class="n">peak VRAM ↓</th></tr></thead><tbody>
 <tr><td colspan="5"><i>RTX PRO 6000 (Blackwell), NVFP4</i></td></tr>
@@ -316,10 +308,10 @@ image = result.images[0]</code></pre></div>
 <tr><td>bf16 (Lightricks)</td><td class="n">—</td><td class="n">—</td><td class="n">7.32</td><td class="n">36.2 GB</td></tr>
 <tr><td><b>Nunchaku Lite INT4 r32 + rotation</b></td><td class="n">17.87</td><td class="n">0.550</td><td class="n good">4.85</td><td class="n good">24.2 GB</td></tr>
 </tbody></table></div>
-<p>This pipeline tells a different story from Diffusers. Its two-stage pipeline uses an ancestral sampler, which amplifies any numerical difference, so absolute PSNR is lower for every file. Here Lightricks' NVFP4 is slightly ahead of ours on PSNR (by 0.34 dB, close to our run-to-run noise), SSIM and transformer time. Ours still runs the transformer about 1.5× faster than bf16 on both GPUs, and the INT4 file covers GPUs where NVFP4 does not run.</p>
+<p>Lightricks' two-stage pipeline uses an ancestral sampler, which amplifies any numerical difference, so absolute PSNR is lower for every file. Here Lightricks' NVFP4 is slightly ahead of ours on PSNR (by 0.34 dB, close to our run-to-run noise), SSIM and transformer time. Ours still runs the transformer about 1.5× faster than bf16 on both GPUs, and the INT4 file covers GPUs where NVFP4 does not run.</p>
 
 <h2 id="try-it">Run the LTX-2.5 files</h2>
-<p>Nunchaku Lite 0.6.0 is on PyPI (release notes: <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.5.0">0.5.0</a>, <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.5.1">0.5.1</a>, <a href="https://github.com/rootonchair/nunchaku-lite/releases/tag/v0.6.0">0.6.0</a>). One install covers everything below, including bitsandbytes for the lighter text encoder on Linux and Windows. LTX-2.5 needs Diffusers 0.43 or newer, and the decoder speed-up needs the v3 kernels, which download from the Hugging Face Hub on first use.</p>
+<p>Nunchaku Lite 0.6.0 is on PyPI. One install covers everything below, including bitsandbytes for the lighter text encoder on Linux and Windows. LTX-2.5 needs Diffusers 0.43 or newer.</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">pip install -U nunchaku-lite  # CUDA kernels download from the Hugging Face Hub on first use</code></pre></div>
 <p>The two checkpoints are in <a href="https://huggingface.co/rootonchair/nunchaku-lite-ltx-2.5-distilled"><code>rootonchair/nunchaku-lite-ltx-2.5-distilled</code></a>: <code>svdq-fp4_r32-ltx-2.5-distilled.safetensors</code> for Blackwell and <code>svdq-int4_r32-ltx-2.5-distilled.safetensors</code> for other CUDA GPUs. They are derivatives of LTX-2.5 under Lightricks' LTX-2.x Community License, which has its own terms, including for commercial use and for labeling generated content.</p>
 <h3>Convert the base model once</h3>
@@ -328,7 +320,7 @@ image = result.images[0]</code></pre></div>
 hf auth login
 python tools/convert_ltx25_distilled.py --out ltx-2.5-distilled-diffusers</code></pre></div>
 <h3>Generate</h3>
-<p>Text to video with audio, 768×512, 121 frames, 8 steps. Set <code>precision</code> to <code>"fp4"</code> on Blackwell and <code>"int4"</code> elsewhere.</p>
+<p>Text to video with audio, 768×512, 121 frames, 8 steps:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">import json
 import os
 
@@ -466,7 +458,6 @@ for name, component in pipe.components.items():
 <li>NVFP4 runs only on Blackwell GPUs. On other CUDA GPUs, use the INT4 file.</li>
 <li>Loading the transformer reads the bf16 weights first (about 44 GB of CPU memory) before replacing them with the quantized ones, and converting the base model needs about 85 GB of CPU memory.</li>
 <li>Untiled decoding is faster but needs about 13.5 GB more VRAM at 768×512×121. Tiled and untiled decodes differ from each other (about 30 dB PSNR), so compare outputs only between runs that decode the same way.</li>
-<li>The quantized path is not bit-reproducible from run to run (about 0.3 dB of mean PSNR).</li>
 </ul>
 </div>
 <script id="vman" type="application/json">{"compare": {"title": "Diffusers, RTX PRO 6000: bf16 vs 4-bit transformers", "ar": "1536/1152", "modes": null, "note": "<span class=\"mg\">Machine-generated<\/span>Top: bf16 | Nunchaku Lite NVFP4 r32. Bottom: Lightricks INT8 | Lightricks NVFP4. Same prompt, seed and decoder in all four panels; the audio is the bf16 clip&rsquo;s. Each label shows transformer time per step, file size and that clip&rsquo;s PSNR against bf16. Each clip (1 to 4 MB) loads when you press play.", "items": [{"name": "woman speaking", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/rtx_woman_speaking.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_rtx_woman_speaking.webp"}, "cap": ""}, {"name": "chef", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/rtx_chef.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_rtx_chef.webp"}, "cap": ""}, {"name": "cat", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/rtx_cat.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_rtx_cat.webp"}, "cap": ""}, {"name": "wild horses", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/rtx_wild_horses.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_rtx_wild_horses.webp"}, "cap": ""}, {"name": "girl and puppy", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/rtx_girl_puppy.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_rtx_girl_puppy.webp"}, "cap": ""}]}, "a100": {"title": "Diffusers, A100 80GB: bf16 vs INT4 and INT8", "ar": "2304/576", "modes": null, "note": "<span class=\"mg\">Machine-generated<\/span>Left to right: bf16 | Nunchaku Lite INT4 r32 + rotation | Lightricks INT8. Same prompts and seeds as above, but generated on the A100, so the bf16 reference differs from the RTX PRO 6000&rsquo;s. Audio is the bf16 clip&rsquo;s. Each label shows seconds per clip, file size and that clip&rsquo;s PSNR against bf16.", "items": [{"name": "woman speaking", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/a100_woman_speaking.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_a100_woman_speaking.webp"}, "cap": ""}, {"name": "chef", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/a100_chef.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_a100_chef.webp"}, "cap": ""}, {"name": "cat", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/a100_cat.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_a100_cat.webp"}, "cap": ""}, {"name": "wild horses", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/a100_wild_horses.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_a100_wild_horses.webp"}, "cap": ""}, {"name": "girl and puppy", "src": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/videos/compare/a100_girl_puppy.mp4"}, "poster": {"v": "https://huggingface.co/datasets/rootonchair/blog-assets/resolve/main/posts/2026-11-26-ltx-2-5-data-free/images/posters/compare_a100_girl_puppy.webp"}, "cap": ""}]}}</script>
