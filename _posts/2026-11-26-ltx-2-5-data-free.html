@@ -174,13 +174,14 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
 <p>diffuse-compressor is a model-agnostic SVDQuant toolkit for diffusion transformers. Its calibrated path runs the full pipeline over a prompt set to pick smoothing scales and weight the SVD. The data-free scripts, built on the method from the <a href="/2026-10-12-data-free-svdquant/">previous post</a>, get there from the weights alone. What that buys you:</p>
 <ul>
 <li><strong>No data to collect.</strong> No prompt set, no captured activations, no guessing whether your calibration prompts match what users will type.</li>
-<li><strong>Only the transformer is loaded.</strong> No text encoder, no VAE, no sampling.</li>
+<li><strong>Only the transformer, and no GPU needed.</strong> No text encoder, no VAE, no sampling. On a 16-vCPU AMD EPYC 7713 with no GPU, FLUX.2 klein-4B quantizes in about 8 minutes (12 GiB of RAM) and Wan2.2-TI2V-5B in about 14 minutes (32 GiB). With a GPU and <code>--offload-model</code>, klein-4B takes 23 seconds on an RTX PRO 4500. Running the result does need a CUDA GPU.</li>
 <li><strong>Any Diffusers model.</strong> The generic scripts find the linear layers on their own; there is nothing model-specific to write.</li>
 <li><strong>Nothing changes downstream.</strong> The export is the same Nunchaku format as a calibrated checkpoint and loads exactly like one.</li>
 <li><strong>Weight-only smoothing.</strong> Smoothing scales come from the weight itself, <code>s = 1 / absmax(W[:, j]) ** E</code>. The low-rank branch is a plain SVD of the smoothed weight.</li>
 <li><strong><code>--smooth-exponent E</code></strong> sets the smoothing strength from 0 (off) to 1 (flatten every input channel's weight span). The default is 0.5, or 0 with <code>--hadamard</code>.</li>
 <li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. Every data-free script takes it; NVFP4 with <code>--hadamard</code> is rejected.</li>
 </ul>
+<p><strong>Why not just INT8?</strong> INT8 is popular because it costs nothing to make: no data, no long export, often just rounding at load time. Data-free quantization gives 4 bits the same convenience, and on LTX-2.5 the result is about half the size of Lightricks' INT8 and faster per step (see the results below).</p>
 
 <h2 id="quantize">Quantize your own model</h2>
 <p>One script, <code>data_free/quantize_hf.py</code>, takes any Diffusers model id, finds its linear layers and quantizes them. Pick NVFP4 for Blackwell GPUs and INT4 with rotation for everything else:</p>
@@ -201,7 +202,7 @@ python examples/text_to_video/data_free/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Dif
 # too big for the GPU in bf16: keep it on the CPU, quantize layer by layer
 python examples/text_to_video/data_free/quantize_hf.py MODEL_ID \
     --precision nvfp4 --offload-model --compute-device cuda</code></pre></div>
-<p>Add <code>--inspect-config</code> to list the layers that would be quantized without quantizing them, <code>--skip PATTERN</code> to keep matching layers in bf16, and <code>--rank N</code> to size the low-rank branch (default 32, a multiple of 16). The default SVD is randomized, so runs differ slightly; <code>--svd-backend full</code> is exact and reproducible. When sweeping <code>--smooth-exponent</code> or <code>--hadamard</code>, give each run its own <code>--cache-dir</code>. FLUX.2 klein and LTX-2.3 also have dedicated scripts in the same folders, which export the same layer layout as their calibrated counterparts.</p>
+<p>Add <code>--inspect-config</code> to list the layers that would be quantized without quantizing them, <code>--skip PATTERN</code> to keep matching layers in bf16, and <code>--rank N</code> to size the low-rank branch (default 32, a multiple of 16). The default SVD is randomized, so runs differ slightly; <code>--svd-backend full</code> is exact and reproducible. When sweeping <code>--smooth-exponent</code> or <code>--hadamard</code>, give each run its own <code>--cache-dir</code>; for a one-off run, <code>--cache-mode disabled</code> skips the cache, which can grow past 10 GB. FLUX.2 klein and LTX-2.3 also have dedicated scripts in the same folders, which export the same layer layout as their calibrated counterparts.</p>
 <p>The checkpoint then loads into the model's ordinary Diffusers pipeline:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">import torch
 from diffusers import Flux2KleinPipeline
@@ -219,7 +220,9 @@ pipe = load_nunchaku_pipeline(
     torch_dtype=torch.bfloat16,
     device="cuda",
 )
-image = pipe("a red fox in fresh snow, golden hour", num_inference_steps=4).images[0]</code></pre></div>
+pipe.to("cuda")  # the text encoder and VAE load on the CPU otherwise
+result = pipe(prompt="a red fox in fresh snow, golden hour", num_inference_steps=4)
+image = result.images[0]</code></pre></div>
 <p>Rotated (<code>-hadamard</code>) checkpoints need Nunchaku Lite's Hadamard quantize op, which is CUDA only.</p>
 
 <h2 id="why-4-bit">The stress test: LTX-2.5</h2>
@@ -446,7 +449,7 @@ for name, component in pipe.components.items():
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li>LTX-2.5 support is a preview. The checkpoints cover the distilled model only.</li>
-<li>The numbers on this page come from the Diffusers port of the recipe. diffuse-compressor's <code>data_free/</code> scripts are tested on CPU, including end to end on small FLUX.2 and LTX-2 models, but have not yet been run on full-size weights on a GPU, and their exports have not yet been loaded in Nunchaku Lite.</li>
+<li>The numbers on this page come from the Diffusers port of the recipe. diffuse-compressor's <code>data_free/</code> scripts have been checked on FLUX.2 klein-4B (exported on a CPU, loaded and run in Nunchaku Lite on a Blackwell GPU) and Wan2.2-TI2V-5B (exported, not yet loaded); not yet on LTX-2.3.</li>
 <li>NVFP4 runs only on Blackwell GPUs. On other CUDA GPUs, use the INT4 file.</li>
 <li>Loading the transformer reads the bf16 weights first (about 44 GB of CPU memory) before replacing them with the quantized ones, and converting the base model needs about 85 GB of CPU memory.</li>
 <li>Untiled decoding is faster but needs about 13.5 GB more VRAM at 768×512×121. Tiled and untiled decodes differ from each other (about 30 dB PSNR), so compare outputs only between runs that decode the same way.</li>
