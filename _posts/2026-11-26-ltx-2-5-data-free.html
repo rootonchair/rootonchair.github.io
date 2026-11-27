@@ -183,8 +183,8 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
 <li><strong>Weight-only smoothing.</strong> Smoothing scales come from the weight itself, <code>s = 1 / absmax(W[:, j]) ** E</code>. The low-rank branch is a plain SVD of the smoothed weight.</li>
 <li><strong><code>--smooth-exponent E</code></strong> sets the smoothing strength from 0 (off) to 1 (flatten every input channel's weight span). The default is 0.5, or 0 with <code>--hadamard</code>.</li>
 <li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. It works in the generic text-to-image, FLUX.2 klein-9B, LTX-2.3 and generic text-to-video scripts. NVFP4 with <code>--hadamard</code> is rejected, because rotation made NVFP4 worse in the previous post.</li>
-<li><strong>Output names that don't collide.</strong> Data-free and rotated checkpoints get <code>-datafree</code> and <code>-hadamard</code> suffixes, so they never overwrite a calibrated file.</li>
-<li><strong>Lean on memory.</strong> The pure-PyTorch <code>torch-dequant</code> runtime fake-quantizes activations in place, and FP4 in bounded chunks, so peak GPU memory stays flat.</li>
+<li><strong>Output names that don't collide.</strong> Data-free and rotated checkpoints get <code>datafree</code> and <code>hadamard</code> markers in their default names, so they never overwrite a calibrated file.</li>
+<li><strong>Lean on memory.</strong> When the pure-PyTorch <code>torch-dequant</code> runtime fake-quantizes activations, it does so in place, and FP4 in bounded chunks, so peak GPU memory stays flat.</li>
 <li><strong>Synthetic calibration for FLUX.2 klein-9B.</strong> Want the full smoothing search and activation-weighted SVD anyway? <code>--synthetic-calibration</code> drives the transformer alone on synthetic denoising trajectories, still without a dataset.</li>
 </ul>
 
@@ -213,7 +213,7 @@ python examples/text_to_video/quantize_ltx2_3.py \
 # any other Diffusers text-to-video model
 python examples/text_to_video/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Diffusers \
     --precision nvfp4 --data-free</code></pre></div>
-<p>Other useful options are <code>--rank N</code> for the low-rank branch (default 32), <code>--skip PATTERN</code> to keep matching layers in bf16, and <code>--inspect-config</code> to list the layers that would be quantized without quantizing them. Calibrated and data-free runs share a cache directory by default, so pass a separate <code>--cache-dir</code>, or <code>--cache-mode disabled</code>, when switching between them or changing <code>--smooth-exponent</code> or <code>--hadamard</code>.</p>
+<p>Every script takes <code>--inspect-config</code>, which lists the layers that would be quantized without quantizing them. The generic <code>quantize_hf.py</code> scripts also take <code>--rank N</code> for the low-rank branch (default 32) and <code>--skip PATTERN</code> to keep matching layers in bf16. Data-free runs keep their own cache, apart from calibrated ones. When comparing <code>--smooth-exponent</code> or <code>--hadamard</code> settings, give each run its own <code>--cache-dir</code> (or use <code>--cache-mode disabled</code>), because runs that share a folder overwrite each other's resume state.</p>
 <p>The checkpoint then loads like any other diffuse-compressor export:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">from diffuse_compressor.runtime import RuntimePipelineSpec, load_evaluation_pipeline
 
@@ -223,10 +223,12 @@ pipe = load_evaluation_pipeline(
         mode="quantized",
         # or "torch-dequant" for a pure-PyTorch correctness check
         runtime="nunchaku-lite",
+        nunchaku_lite_target="flux2",
         checkpoint=(
             "outputs/checkpoints/"
             "svdq-nvfp4_r32-flux-2-klein-4b-datafree.safetensors"
         ),
+        precision="fp4",  # "int4" for an INT4 checkpoint
         device="cuda",
     ),
 )
@@ -272,7 +274,7 @@ image = result.images[0]</code></pre></div>
 <li><b>Lightricks' INT8 is closest to bf16</b>, by about 5 dB on Blackwell (26.09 against 21.12) and 4.5 dB on the A100 (21.67 against 17.15). With twice the bits per weight, that is expected.</li>
 </ul>
 <p>A lower PSNR means the video differs more from the bf16 video for the same seed. It does not have to mean the video looks worse: a distilled 8-step model turns small numerical differences into a slightly different pose or camera path, and PSNR punishes that as much as it punishes blur. Watch the comparisons below: five of the six prompts, on both GPUs.</p>
-<p>One more caveat on precision: our quantized path is not bit-reproducible from run to run. Mean PSNR moves by about 0.3 dB between runs, and one A100 rerun of the same INT4 file scored 22.4 dB against the first run. Treat differences of a few tenths of a dB as noise.</p>
+<p>One more caveat on precision: our quantized path is not bit-reproducible from run to run. Mean PSNR moves by about 0.3 dB between runs, and on the A100, two runs of the same INT4 file matched each other at only 22.4 dB PSNR. Treat differences of a few tenths of a dB as noise.</p>
 
 <div class="vp" data-set="compare"></div>
 
@@ -321,8 +323,9 @@ image = result.images[0]</code></pre></div>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">pip install -U nunchaku-lite  # CUDA kernels download from the Hugging Face Hub on first use</code></pre></div>
 <p>The two checkpoints are in <a href="https://huggingface.co/rootonchair/nunchaku-lite-ltx-2.5-distilled"><code>rootonchair/nunchaku-lite-ltx-2.5-distilled</code></a>: <code>svdq-fp4_r32-ltx-2.5-distilled.safetensors</code> for Blackwell and <code>svdq-int4_r32-ltx-2.5-distilled.safetensors</code> for other CUDA GPUs. They are derivatives of LTX-2.5 under Lightricks' LTX-2.x Community License, which has its own terms, including for commercial use and for labeling generated content.</p>
 <h3>Convert the base model once</h3>
-<p>The repo holds only the transformer. The text encoder, VAEs, vocoder and diffusion decoder come from the base model in the Diffusers folder layout, and Lightricks ships LTX-2.5 as single files. Accept the license of the gated <code>Lightricks/LTX-2.5</code> repo, log in, and convert with the script in the Nunchaku Lite repository. It downloads 72 GB.</p>
-<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">hf auth login
+<p>The repo holds only the transformer. The text encoder, VAEs, vocoder and diffusion decoder come from the base model in the Diffusers folder layout, and Lightricks ships LTX-2.5 as single files. Accept the license of the gated <code>Lightricks/LTX-2.5</code> repo, log in, and convert with the script in the Nunchaku Lite repository, which needs a clone (the pip package does not include it). It downloads 72 GB.</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">git clone https://github.com/rootonchair/nunchaku-lite &amp;&amp; cd nunchaku-lite
+hf auth login
 python tools/convert_ltx25_distilled.py --out ltx-2.5-distilled-diffusers</code></pre></div>
 <h3>Generate</h3>
 <p>Text to video with audio, 768×512, 121 frames, 8 steps. Set <code>precision</code> to <code>"fp4"</code> on Blackwell and <code>"int4"</code> elsewhere.</p>
