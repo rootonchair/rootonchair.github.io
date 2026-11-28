@@ -217,11 +217,45 @@ pipe.to("cuda")  # the text encoder and VAE load on the CPU otherwise
 result = pipe(prompt="a red fox in fresh snow, golden hour", num_inference_steps=4)
 image = result.images[0]</code></pre></div>
 <p>Rotated (<code>-hadamard</code>) checkpoints need Nunchaku Lite's Hadamard quantize op, which is CUDA only.</p>
-<p>Other models work the same way. Video models use the copy of the script in the <code>text_to_video</code> folder, and a model too big for your GPU in bf16 can stay on the CPU and be quantized layer by layer:</p>
+<p>Other models work the same way. Video models use the copy of the script in the <code>text_to_video</code> folder:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">python examples/text_to_video/data_free/quantize_hf.py Wan-AI/Wan2.2-TI2V-5B-Diffusers \
-    --precision nvfp4
+    --precision nvfp4</code></pre></div>
+<p>Wan needs one change at load time. Nunchaku Lite 0.6.0's <code>load_nunchaku_pipeline</code> leaves Wan's rotary buffers on the meta device, so load the transformer normally and patch it with <code>patch_transformer</code>:</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-python">import torch
+from diffusers import WanPipeline, WanTransformer3DModel
+from diffusers.utils import export_to_video
+from nunchaku_lite import patch_transformer
 
-python examples/text_to_video/data_free/quantize_hf.py MODEL_ID \
+model_id = "Wan-AI/Wan2.2-TI2V-5B-Diffusers"
+ckpt = (
+    "outputs/checkpoints/"
+    "svdq-nvfp4_r32-wan2-2-ti2v-5b-diffusers-datafree.safetensors"
+)
+
+transformer = WanTransformer3DModel.from_pretrained(
+    model_id, subfolder="transformer", torch_dtype=torch.bfloat16
+)
+patch_transformer(
+    transformer, ckpt, target="manifest", precision="fp4",
+    torch_dtype=torch.bfloat16,  # required, or the 4-bit kernel aborts
+)
+pipe = WanPipeline.from_pretrained(
+    model_id, transformer=transformer, torch_dtype=torch.bfloat16
+).to("cuda")
+
+frames = pipe(
+    prompt="a red fox trotting through fresh snow at golden hour, cinematic",
+    height=480,
+    width=832,
+    num_frames=49,
+    num_inference_steps=50,
+    guidance_scale=5.0,
+    generator=torch.Generator("cuda").manual_seed(0),
+).frames[0]
+export_to_video(frames, "wan_nvfp4.mp4", fps=24)</code></pre></div>
+<p>On an RTX PRO 4500 at those settings, the NVFP4 clip takes 45 s against 65 s for bf16, with peak VRAM of 19.4 GiB against 25.8 GiB. The INT4 + Hadamard file also works (<code>precision="int4"</code> and its <code>-hadamard</code> path) but takes 146 s on that GPU, so on Blackwell use NVFP4.</p>
+<p>A model too big for your GPU in bf16 can stay on the CPU and be quantized layer by layer on the GPU. Exported this way on the same RTX PRO 4500, Wan2.2-TI2V-5B takes about a minute:</p>
+<div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">python examples/text_to_video/data_free/quantize_hf.py MODEL_ID \
     --precision nvfp4 --offload-model --compute-device cuda</code></pre></div>
 <p>Add <code>--inspect-config</code> to list the layers that would be quantized without quantizing them, <code>--skip PATTERN</code> to keep matching layers in bf16, and <code>--rank N</code> to size the low-rank branch (default 32, a multiple of 16). The default SVD is randomized, so runs differ slightly; <code>--svd-backend full</code> is exact and reproducible. When sweeping <code>--smooth-exponent</code> or <code>--hadamard</code>, give each run its own <code>--cache-dir</code>; for a one-off run, <code>--cache-mode disabled</code> skips the cache, which can grow past 10 GB. FLUX.2 klein and LTX-2.3 also have dedicated scripts in the same folders, which export the same layer layout as their calibrated counterparts.</p>
 
@@ -449,7 +483,7 @@ for name, component in pipe.components.items():
 <h2 id="limitations">Limitations</h2>
 <ul>
 <li>LTX-2.5 support is a preview. The checkpoints cover the distilled model only.</li>
-<li>The numbers on this page come from the Diffusers port of the recipe. diffuse-compressor's <code>data_free/</code> scripts have been checked on FLUX.2 klein-4B (exported on a CPU, loaded and run in Nunchaku Lite on a Blackwell GPU) and Wan2.2-TI2V-5B (exported, not yet loaded); not yet on LTX-2.3.</li>
+<li>The numbers on this page come from the Diffusers port of the recipe. diffuse-compressor's <code>data_free/</code> scripts have been checked on FLUX.2 klein-4B (exported on a CPU, loaded and run in Nunchaku Lite on a Blackwell GPU) and Wan2.2-TI2V-5B (loaded through <code>patch_transformer</code> and run on a Blackwell GPU); not yet on LTX-2.3.</li>
 <li>NVFP4 runs only on Blackwell GPUs. On other CUDA GPUs, use the INT4 file.</li>
 <li>Loading the transformer reads the bf16 weights first (about 44 GB of CPU memory) before replacing them with the quantized ones, and converting the base model needs about 85 GB of CPU memory.</li>
 <li>Untiled decoding is faster but needs about 13.5 GB more VRAM at 768×512×121. Tiled and untiled decodes differ from each other (about 30 dB PSNR), so compare outputs only between runs that decode the same way.</li>
