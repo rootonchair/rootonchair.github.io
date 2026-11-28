@@ -181,7 +181,7 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
 <li><strong><code>--smooth-exponent E</code></strong> sets the smoothing strength from 0 (off) to 1 (flatten every input channel's weight span). The default is 0.5, or 0 with <code>--hadamard</code>.</li>
 <li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. Every data-free script takes it; NVFP4 with <code>--hadamard</code> is rejected.</li>
 </ul>
-<p><strong>Why not just INT8?</strong> INT8 is popular because it costs nothing to make: no calibration run, no GPU time, often just rounding at load time. Data-free quantization makes 4 bits just as cheap to produce. On LTX-2.5 the file is about half the size of Lightricks' INT8 and faster per step (results below).</p>
+<p><strong>Why not just INT8?</strong> INT8 is popular because it costs nothing to make: no calibration run, no GPU time, often just rounding at load time. Lightricks' NVFP4 file, by contrast, stores a fixed activation scale for every layer, which is normally set from a calibration run. Data-free quantization makes 4 bits as cheap to produce as INT8. On LTX-2.5 the file is about half the size of Lightricks' INT8 and faster per step (results below).</p>
 
 <h2 id="quantize">Quantize your own model</h2>
 <p>One script, <code>data_free/quantize_hf.py</code>, takes any Diffusers model id, finds its linear layers and quantizes them. Pick NVFP4 for Blackwell GPUs and INT4 with rotation for everything else:</p>
