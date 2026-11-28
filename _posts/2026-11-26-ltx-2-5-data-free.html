@@ -270,6 +270,7 @@ export_to_video(frames, "wan_nvfp4.mp4", fps=24)</code></pre></div>
 <tr><td>Blackwell (tested: RTX PRO 6000)</td><td>NVFP4 weights and activations, rank 32</td><td>no smoothing, no rotation</td></tr>
 <tr><td>other CUDA GPUs (tested: A100, L40S)</td><td>INT4 weights and activations, rank 32</td><td>smoothing exponent 0, Hadamard rotation</td></tr>
 </tbody></table></div>
+<p>Neither file uses smoothing: without activations to measure, smoothing can only guess its scales from the weights, and at rank 32 turning it off did as well or better on LTX-2.3 and FLUX.2-klein in the <a href="/2026-10-12-data-free-svdquant/#rank-and-smoothing">previous post</a>. That was not re-tested on LTX-2.5.</p>
 <p>The rotation spreads outliers across input channels, so the INT4 grid wastes less of its range on them; it is stored in the checkpoint and applied at load time. On FLUX.2-klein it improved INT4 by about 1.7 dB of per-layer output SQNR and made NVFP4 worse, which is why only the INT4 file uses it. That comparison was not repeated on LTX-2.5.</p>
 
 <h2 id="results">Results against bf16 and Lightricks' files</h2>
