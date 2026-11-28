@@ -8,7 +8,7 @@ tags: [en, quantization, diffusion, video]
 comments: true
 full-width: true
 author: Pham Hong Vinh
-excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from its weights alone: no dataset, no prompts, no text encoder. On Lightricks' 22B LTX-2.5 the recipe gives a 3.5x smaller transformer that runs 1.83x faster than bf16 and lands 2.3 dB closer to bf16 than Lightricks' own NVFP4."
+excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from its weights alone: no GPU hours, no dataset, no prompts. On Lightricks' 22B LTX-2.5 the recipe gives a 3.5x smaller transformer that runs 1.83x faster than bf16 and lands 2.3 dB closer to bf16 than Lightricks' own NVFP4."
 ---
 {% raw %}
 <div class="ltx">
@@ -152,7 +152,7 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
 .ltx td.n b,.ltx td b{font-weight:600}
 </style>
 <div class="wrap">
-<p class="lede">Calibration is the part of 4-bit quantization nobody enjoys: pick a prompt set, load the whole pipeline, run it, capture activations, hope they are representative. <a href="https://github.com/rootonchair/diffuse-compressor">diffuse-compressor</a> no longer needs any of it. Its <code>data_free/</code> scripts quantize a Diffusers image or video model from its weights alone, loading nothing but the transformer, and write a checkpoint that runs on Nunchaku Lite's 4-bit kernels. To show what that is worth, we pointed the recipe at one of the hardest open models around: LTX-2.5, Lightricks' 22B model that generates video with a soundtrack.</p>
+<p class="lede">Calibration is what makes 4-bit quantization expensive. The whole pipeline, text encoder and VAE included, has to fit on a big GPU and run a prompt set while every layer's activations are captured; for a large video model that means a high-end card tied up for hours. <a href="https://github.com/rootonchair/diffuse-compressor">diffuse-compressor</a> no longer needs any of it. Its <code>data_free/</code> scripts quantize a Diffusers image or video model from its weights alone, loading nothing but the transformer, and write a checkpoint that runs on Nunchaku Lite's 4-bit kernels. To show what that is worth, we pointed the recipe at one of the hardest open models around: LTX-2.5, Lightricks' 22B model that generates video with a soundtrack.</p>
 
 <p class="keyline"><span class="dir">↑</span> higher is better &nbsp;·&nbsp; <span class="dir">↓</span> lower is better. PSNR and SSIM compare each video with the bf16 video for the same prompt, seed and GPU. Every video on this page is machine-generated.</p>
 
@@ -171,17 +171,17 @@ excerpt: "diffuse-compressor can now quantize any Diffusers model to 4 bits from
 </div>
 
 <h2 id="data-free">No dataset, no pipeline</h2>
-<p>diffuse-compressor is a model-agnostic SVDQuant toolkit for diffusion transformers. Its calibrated path runs the full pipeline over a prompt set to pick smoothing scales and weight the SVD. The data-free scripts, built on the method from the <a href="/2026-10-12-data-free-svdquant/">previous post</a>, get there from the weights alone. What that buys you:</p>
+<p>diffuse-compressor is a model-agnostic SVDQuant toolkit for diffusion transformers. Its calibrated path runs the full pipeline over a prompt set on a GPU to pick smoothing scales and weight the SVD. The data-free scripts, built on the method from the <a href="/2026-10-12-data-free-svdquant/">previous post</a>, get there from the weights alone. What that buys you:</p>
 <ul>
+<li><strong>No GPU hours.</strong> Only the transformer is loaded: no text encoder, no VAE, no sampling. On a 16-vCPU AMD EPYC 7713 with no GPU, FLUX.2 klein-4B quantizes in about 8 minutes (12 GiB of RAM) and Wan2.2-TI2V-5B in about 14 minutes (32 GiB). With a GPU and <code>--offload-model</code>, klein-4B takes 23 seconds on an RTX PRO 4500. Running the result does need a CUDA GPU.</li>
 <li><strong>No data to collect.</strong> No prompt set, no captured activations, no guessing whether your calibration prompts match what users will type.</li>
-<li><strong>Only the transformer, and no GPU needed.</strong> No text encoder, no VAE, no sampling. On a 16-vCPU AMD EPYC 7713 with no GPU, FLUX.2 klein-4B quantizes in about 8 minutes (12 GiB of RAM) and Wan2.2-TI2V-5B in about 14 minutes (32 GiB). With a GPU and <code>--offload-model</code>, klein-4B takes 23 seconds on an RTX PRO 4500. Running the result does need a CUDA GPU.</li>
 <li><strong>Any Diffusers model.</strong> The generic scripts find the linear layers on their own; there is nothing model-specific to write.</li>
 <li><strong>Nothing changes downstream.</strong> The export is the same Nunchaku format as a calibrated checkpoint and loads exactly like one.</li>
 <li><strong>Weight-only smoothing.</strong> Smoothing scales come from the weight itself, <code>s = 1 / absmax(W[:, j]) ** E</code>. The low-rank branch is a plain SVD of the smoothed weight.</li>
 <li><strong><code>--smooth-exponent E</code></strong> sets the smoothing strength from 0 (off) to 1 (flatten every input channel's weight span). The default is 0.5, or 0 with <code>--hadamard</code>.</li>
 <li><strong><code>--hadamard</code></strong> (INT4 only) rotates each layer's input with a 64-block Hadamard transform before quantizing. Every data-free script takes it; NVFP4 with <code>--hadamard</code> is rejected.</li>
 </ul>
-<p><strong>Why not just INT8?</strong> INT8 is popular because it costs nothing to make: no data, no long export, often just rounding at load time. Data-free quantization gives 4 bits the same convenience, and on LTX-2.5 the result is about half the size of Lightricks' INT8 and faster per step (see the results below).</p>
+<p><strong>Why not just INT8?</strong> INT8 is popular because it costs nothing to make: no calibration run, no GPU time, often just rounding at load time. Data-free quantization gives 4 bits the same convenience, and on LTX-2.5 the result is about half the size of Lightricks' INT8 and faster per step (see the results below).</p>
 
 <h2 id="quantize">Quantize your own model</h2>
 <p>One script, <code>data_free/quantize_hf.py</code>, takes any Diffusers model id, finds its linear layers and quantizes them. Pick NVFP4 for Blackwell GPUs and INT4 with rotation for everything else:</p>
