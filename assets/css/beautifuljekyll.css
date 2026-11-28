@@ -1146,6 +1146,14 @@ pre {
   opacity: 0.9;
 }
 .post-feature-figure {
-  max-width: 730px;   /* the reading column, also for full-width posts */
+  max-width: 970px;   /* the reading column, also for full-width posts */
   margin: 0 auto 2rem;
+}
+
+/* --- Wider reading column on large screens (Bootstrap 4 caps .container-md at 1140px) --- */
+
+@media (min-width: 1200px) {
+  .container-md {
+    max-width: 1200px;
+  }
 }
