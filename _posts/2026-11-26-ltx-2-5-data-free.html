@@ -253,7 +253,7 @@ frames = pipe(
     generator=torch.Generator("cuda").manual_seed(0),
 ).frames[0]
 export_to_video(frames, "wan_nvfp4.mp4", fps=24)</code></pre></div>
-<p>On an RTX PRO 4500 at those settings, the NVFP4 clip takes 45 s against 65 s for bf16, with peak VRAM of 19.4 GiB against 25.8 GiB. The INT4 + Hadamard file also works (<code>precision="int4"</code> and its <code>-hadamard</code> path) but takes 146 s on that GPU, so on Blackwell use NVFP4.</p>
+<p>On an RTX PRO 4500 at those settings, the NVFP4 clip takes 45 s against 65 s for bf16, with peak VRAM of 19.4 GiB against 25.8 GiB.</p>
 <p>A model too big for your GPU in bf16 can stay on the CPU and be quantized layer by layer on the GPU. Exported this way on the same RTX PRO 4500, Wan2.2-TI2V-5B takes about a minute:</p>
 <div class="code"><button type="button" class="copy" aria-label="Copy code">Copy</button><pre><code class="language-bash">python examples/text_to_video/data_free/quantize_hf.py MODEL_ID \
     --precision nvfp4 --offload-model --compute-device cuda</code></pre></div>
